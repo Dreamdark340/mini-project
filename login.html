@@ -28,6 +28,10 @@
         document.getElementById('recoveryCode').parentElement.style.display='none';
         document.getElementById('twoFABadge').textContent='Enter 6-digit code';
       });
+      // Connectivity check
+      pingHealth();
+      // Role switcher
+      initRoleSwitcher();
     }
 
     let pendingUser = null;
@@ -54,7 +58,9 @@
         } else {
           finalizeLoginWithToken(username, data);
         }
-      }catch(err){ showError('Network error. Try again.'); }
+      }catch(err){
+        showError('Network error. Is the API running at http://localhost:4000?');
+      }
     }
 
     async function onTwoFASubmit(e){
@@ -84,6 +90,30 @@
       if(role === 'hr' || role === 'admin'){ window.location.href='hr-dashboard.html'; } else { window.location.href='employee-profile.html'; }
     }
 
+    async function pingHealth(){
+      try{
+        const r = await fetch(`${API_BASE}/health`, { method:'GET' });
+        if(!r.ok) throw new Error('bad');
+        document.getElementById('apiStatus').textContent='API: Online';
+        document.getElementById('apiStatus').className='status-badge success';
+      }catch{
+        document.getElementById('apiStatus').textContent='API: Offline';
+        document.getElementById('apiStatus').className='status-badge danger';
+      }
+    }
+
+    function initRoleSwitcher(){
+      const select = document.getElementById('roleSelect');
+      if(!select) return;
+      select.addEventListener('change', ()=>{
+        const v = select.value;
+        if(v==='employee'){ document.getElementById('username').value='aaron'; document.getElementById('password').value='password'; }
+        else if(v==='hr'){ document.getElementById('username').value='hr1'; document.getElementById('password').value='password'; }
+        else if(v==='admin'){ document.getElementById('username').value='admin'; document.getElementById('password').value='admin123'; }
+        else { document.getElementById('username').value=''; document.getElementById('password').value=''; }
+      });
+    }
+
     document.addEventListener('DOMContentLoaded', onDomReady);
   </script>
 </head>
@@ -93,12 +123,21 @@
       <div class="auth-header">
         <div class="brand"><i class="fas fa-chart-line"></i> Payroll Management</div>
         <h1>Sign in to your account</h1>
-        <div class="hint">Use demo password: <strong>password</strong></div>
+        <div class="hint">Use role switcher below to autofill demo users. <span id="apiStatus" class="status-badge">Checking API...</span></div>
       </div>
       <div id="errorBox" class="error"></div>
 
       <!-- Step 1: Credentials -->
       <form id="loginForm">
+        <div class="form-group">
+          <label for="roleSelect">Quick role</label>
+          <select id="roleSelect">
+            <option value="">Choose…</option>
+            <option value="employee">Employee (aaron/password)</option>
+            <option value="hr">HR (hr1/password)</option>
+            <option value="admin">Admin (admin/admin123)</option>
+          </select>
+        </div>
         <div class="form-group">
           <label for="username">Username</label>
           <input type="text" id="username" placeholder="e.g. aaron" autocomplete="username" required>
