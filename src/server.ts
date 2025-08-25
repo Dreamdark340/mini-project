@@ -82,6 +82,46 @@ app.get('/health', async (_req, res) => {
       fullName: 'Alex Admin', department: 'Admin', employeeId: 'EMP9999', role: 'admin', companyId: adminCo.id
     }});
   }
+  // seed additional employees for Acme
+  const demoUsers = [
+    { username: 'emma', email: 'emma@acme.com', fullName: 'Emma Stone', department: 'Finance' },
+    { username: 'liam', email: 'liam@acme.com', fullName: 'Liam Carter', department: 'Engineering' },
+    { username: 'olivia', email: 'olivia@acme.com', fullName: 'Olivia Brown', department: 'HR' }
+  ];
+  for (const du of demoUsers) {
+    const exists = await prisma.user.findUnique({ where: { username: du.username } });
+    if (!exists) {
+      const hash = await bcrypt.hash('password', 10);
+      await prisma.user.create({ data: { username: du.username, email: du.email, passwordHash: hash, fullName: du.fullName, department: du.department, employeeId: generateEmployeeId(), role: 'employee', companyId: acme.id } });
+    }
+  }
+  // seed tax slabs (old regime) for Acme if none
+  const slabCount = await prisma.taxSlab.count({ where: { companyId: acme.id } });
+  if (slabCount === 0) {
+    await prisma.taxSlab.createMany({ data: [
+      { companyId: acme.id, regime: 'old', minIncome: 0, maxIncome: 25000000, rateBps: 0 },
+      { companyId: acme.id, regime: 'old', minIncome: 25000000, maxIncome: 50000000, rateBps: 500 },
+      { companyId: acme.id, regime: 'old', minIncome: 50000000, maxIncome: 100000000, rateBps: 2000 },
+      { companyId: acme.id, regime: 'old', minIncome: 100000000, maxIncome: 0, rateBps: 3000 }
+    ]});
+  }
+  // seed payroll entries for last 6 months for each Acme employee
+  const acmeEmployees = await prisma.user.findMany({ where: { companyId: acme.id, role: 'employee' } });
+  const today = new Date();
+  for (const emp of acmeEmployees) {
+    for (let i = 1; i <= 6; i++) {
+      const end = new Date(today.getFullYear(), today.getMonth() - i + 1, 0);
+      const start = new Date(end.getFullYear(), end.getMonth(), 1);
+      const exists = await prisma.payrollEntry.findFirst({ where: { userId: emp.id, companyId: acme.id, periodStart: start, periodEnd: end } });
+      if (!exists) {
+        const base = 250000; // $2500
+        const bonus = i % 3 === 0 ? 50000 : 0; // occasional bonus
+        const ded = 10000; // $100
+        const net = base + bonus - ded;
+        await prisma.payrollEntry.create({ data: { userId: emp.id, companyId: acme.id, periodStart: start, periodEnd: end, baseSalary: base, bonus, deductions: ded, netPay: net } });
+      }
+    }
+  }
   res.json({ ok: true });
 });
 
