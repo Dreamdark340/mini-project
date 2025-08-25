@@ -55,7 +55,7 @@ function safeDecrypt(b64?: string | null): string | undefined {
   try { return b64 ? JSON.parse(decryptString(b64)).source ?? 'enc' : undefined; } catch { return undefined; }
 }
 
-function detectFormat(lowerHeaders: string[]): { symbol: string; type: string; amount: string; price?: string; timestamp: string } | null {
+function detectFormat(lowerHeaders: string[]): { symbol: string; symbolKind?: 'market'|'asset'|'symbol'; type: string; amount: string; price?: string; timestamp: string } | null {
   // Supported schemas (lower-cased header names):
   // 1) generic: symbol,type,amount,price,timestamp
   // 2) binance-like: date, market (BTCUSDT), type, price, amount
@@ -63,15 +63,28 @@ function detectFormat(lowerHeaders: string[]): { symbol: string; type: string; a
   const h = (name: string) => lowerHeaders.indexOf(name);
   // Generic
   if (h('symbol')>=0 && h('type')>=0 && h('amount')>=0 && h('timestamp')>=0) {
-    return { symbol: lowerHeaders[h('symbol')], type: lowerHeaders[h('type')], amount: lowerHeaders[h('amount')], price: h('price')>=0? lowerHeaders[h('price')]: undefined, timestamp: lowerHeaders[h('timestamp')] };
+    return { symbol: lowerHeaders[h('symbol')], symbolKind: 'symbol', type: lowerHeaders[h('type')], amount: lowerHeaders[h('amount')], price: h('price')>=0? lowerHeaders[h('price')]: undefined, timestamp: lowerHeaders[h('timestamp')] };
   }
   // Binance-like
   if (h('date')>=0 && h('market')>=0 && h('type')>=0 && h('price')>=0 && h('amount')>=0) {
-    return { symbol: lowerHeaders[h('market')], type: lowerHeaders[h('type')], amount: lowerHeaders[h('amount')], price: lowerHeaders[h('price')], timestamp: lowerHeaders[h('date')] };
+    return { symbol: lowerHeaders[h('market')], symbolKind: 'market', type: lowerHeaders[h('type')], amount: lowerHeaders[h('amount')], price: lowerHeaders[h('price')], timestamp: lowerHeaders[h('date')] };
   }
   // Coinbase-like
   if (h('timestamp')>=0 && h('transaction type')>=0 && h('asset')>=0 && h('quantity transacted')>=0 && h('spot price at transaction')>=0) {
-    return { symbol: lowerHeaders[h('asset')], type: lowerHeaders[h('transaction type')], amount: lowerHeaders[h('quantity transacted')], price: lowerHeaders[h('spot price at transaction')], timestamp: lowerHeaders[h('timestamp')] };
+    return { symbol: lowerHeaders[h('asset')], symbolKind: 'asset', type: lowerHeaders[h('transaction type')], amount: lowerHeaders[h('quantity transacted')], price: lowerHeaders[h('spot price at transaction')], timestamp: lowerHeaders[h('timestamp')] };
+  }
+  // Bybit-like: time, symbol, side, price, qty
+  if (h('time')>=0 && h('symbol')>=0 && (h('side')>=0 || h('type')>=0) && (h('qty')>=0 || h('quantity')>=0) && h('price')>=0) {
+    const qtyKey = h('qty')>=0 ? lowerHeaders[h('qty')] : lowerHeaders[h('quantity')];
+    const typeKey = h('side')>=0 ? lowerHeaders[h('side')] : lowerHeaders[h('type')];
+    return { symbol: lowerHeaders[h('symbol')], symbolKind: 'symbol', type: typeKey, amount: qtyKey, price: lowerHeaders[h('price')], timestamp: lowerHeaders[h('time')] };
+  }
+  // Kraken-like: time, type, asset pair, price, vol
+  if (h('time')>=0 && (h('type')>=0 || h('side')>=0) && (h('asset pair')>=0 || h('pair')>=0) && (h('vol')>=0 || h('volume')>=0) && h('price')>=0) {
+    const pairKey = h('asset pair')>=0 ? lowerHeaders[h('asset pair')] : lowerHeaders[h('pair')];
+    const volKey = h('vol')>=0 ? lowerHeaders[h('vol')] : lowerHeaders[h('volume')];
+    const typeKey = h('type')>=0 ? lowerHeaders[h('type')] : lowerHeaders[h('side')];
+    return { symbol: pairKey, symbolKind: 'market', type: typeKey, amount: volKey, price: lowerHeaders[h('price')], timestamp: lowerHeaders[h('time')] };
   }
   return null;
 }
@@ -83,6 +96,22 @@ function normalizeType(raw: string): 'trade'|'staking'|'airdrop'|'mining' {
   if (['airdrop','gift'].includes(t)) return 'airdrop';
   if (['mine','mining'].includes(t)) return 'mining';
   return 'trade';
+}
+
+function extractBaseFromMarket(market: string): string {
+  const m = market.toUpperCase();
+  // Common quote assets to strip: USDT, USD, USDC, EUR, BTC, ETH
+  const quotes = ['USDT','USD','USDC','EUR','BTC','ETH'];
+  for (const q of quotes) {
+    if (m.endsWith(q) && m.length > q.length) return m.slice(0, m.length - q.length);
+  }
+  // If contains '-', take first part
+  if (m.includes('-')) return m.split('-')[0];
+  return m;
+}
+
+function normalizeAsset(asset: string): string {
+  return asset.replace(/[^A-Za-z0-9]/g, '');
 }
 
 function signToken(userId: string) {
@@ -417,6 +446,7 @@ app.get('/api/trader/forecast', authMiddleware, requireRole('trader', 'admin'), 
 
 app.post('/api/trader/import/csv', authMiddleware, requireRole('trader', 'admin'), upload.single('file'), async (req: any, res) => {
   if (!req.file || !req.file.buffer) return res.status(400).json({ error: 'CSV file is required' });
+  const dryRun = (req.query?.dryRun === '1' || req.query?.dryRun === 'true');
   const csv = req.file.buffer.toString('utf8');
   let records: any[];
   try {
@@ -426,36 +456,50 @@ app.post('/api/trader/import/csv', authMiddleware, requireRole('trader', 'admin'
   }
   if (!Array.isArray(records) || records.length === 0) return res.status(400).json({ error: 'No rows found' });
   // Detect columns
-  const header = Object.keys(records[0]).map(k=>k.toLowerCase());
+  const headerOrig = Object.keys(records[0]);
+  const header = headerOrig.map(k=>k.toLowerCase());
   const mapping = detectFormat(header);
   if (!mapping) return res.status(400).json({ error: 'Unsupported CSV format' });
   // Validate and transform rows
-  const errors: string[] = [];
-  const txs: { symbol: string; amount: number; priceUsdCents?: number; type: string; timestamp: Date; sourceEnc?: string }[] = [];
+  const rowErrors: { row: number; message: string }[] = [];
+  const preview: { row: number; symbol: string; amount: number; price?: number; type: string; timestamp: string }[] = [];
+  const toPersist: { symbol: string; amount: number; priceUsdCents?: number; type: string; timestamp: Date; sourceEnc?: string }[] = [];
   for (let i=0; i<records.length; i++) {
     const r = records[i];
     const rowNum = i + 2; // +1 header, +1 1-indexed
-    const symbol = String(r[mapping.symbol]).toUpperCase();
-    const type = normalizeType(String(r[mapping.type]));
-    const amount = parseFloat(String(r[mapping.amount]));
-    const price = mapping.price ? parseFloat(String(r[mapping.price])) : undefined;
-    const timeRaw = String(r[mapping.timestamp]);
+    // Extract fields according to mapping with helpers for market/asset symbols
+    let rawSymbol = String(r[mapping.symbol] ?? '').trim();
+    if (mapping.symbolKind === 'market') rawSymbol = extractBaseFromMarket(rawSymbol);
+    if (mapping.symbolKind === 'asset') rawSymbol = normalizeAsset(rawSymbol);
+    const symbol = rawSymbol.toUpperCase();
+    const type = normalizeType(String(r[mapping.type] ?? ''));
+    const amount = parseFloat(String(r[mapping.amount] ?? ''));
+    const price = mapping.price ? parseFloat(String(r[mapping.price] ?? '')) : undefined;
+    const timeRaw = String(r[mapping.timestamp] ?? '');
     const timestamp = new Date(timeRaw);
-    if (!symbol || !/^[A-Z0-9]{2,10}$/.test(symbol)) errors.push(`Row ${rowNum}: invalid symbol`);
-    if (!['trade','staking','airdrop','mining'].includes(type)) errors.push(`Row ${rowNum}: invalid type`);
-    if (!Number.isFinite(amount)) errors.push(`Row ${rowNum}: invalid amount`);
-    if (mapping.price && !Number.isFinite(price as number)) errors.push(`Row ${rowNum}: invalid price`);
-    if (isNaN(timestamp.getTime())) errors.push(`Row ${rowNum}: invalid timestamp`);
-    if (errors.length === 0) {
-      txs.push({ symbol, amount, priceUsdCents: price !== undefined ? Math.round((price as number) * 100) : undefined, type, timestamp, sourceEnc: encryptString(JSON.stringify({ source: 'CSV' })) });
+    const errors: string[] = [];
+    if (!symbol || !/^[A-Z0-9]{2,10}$/.test(symbol)) errors.push('invalid symbol');
+    if (!['trade','staking','airdrop','mining'].includes(type)) errors.push('invalid type');
+    if (!Number.isFinite(amount)) errors.push('invalid amount');
+    if (mapping.price && !Number.isFinite(price as number)) errors.push('invalid price');
+    if (isNaN(timestamp.getTime())) errors.push('invalid timestamp');
+    if (errors.length > 0) {
+      rowErrors.push({ row: rowNum, message: errors.join(', ') });
+      continue;
     }
+    preview.push({ row: rowNum, symbol, amount, price, type, timestamp: timestamp.toISOString() });
+    toPersist.push({ symbol, amount, priceUsdCents: price !== undefined ? Math.round((price as number) * 100) : undefined, type, timestamp, sourceEnc: encryptString(JSON.stringify({ source: 'CSV' })) });
   }
-  if (errors.length > 0) return res.status(400).json({ error: 'Validation failed', details: errors.slice(0, 50) });
-  // Persist
+  if (dryRun) {
+    return res.json({ ok: true, dryRun: true, rows: preview.slice(0, 200), errors: rowErrors.slice(0, 200), totalValid: preview.length, totalErrors: rowErrors.length });
+  }
+  if (toPersist.length === 0) {
+    return res.status(400).json({ error: 'No valid rows to import', errors: rowErrors.slice(0, 200) });
+  }
   const created = await prisma.$transaction(
-    txs.map(t => prisma.walletTransaction.create({ data: { userId: req.userId, symbol: t.symbol, amount: t.amount, priceUsdCents: t.priceUsdCents, type: t.type, timestamp: t.timestamp, sourceEnc: t.sourceEnc } }))
+    toPersist.map(t => prisma.walletTransaction.create({ data: { userId: req.userId, symbol: t.symbol, amount: t.amount, priceUsdCents: t.priceUsdCents, type: t.type, timestamp: t.timestamp, sourceEnc: t.sourceEnc } }))
   );
-  res.json({ ok: true, imported: created.length });
+  res.json({ ok: true, imported: created.length, errors: rowErrors, totalValid: toPersist.length, totalErrors: rowErrors.length });
 });
 
 app.get('/api/trader/report.pdf', authMiddleware, requireRole('trader', 'admin'), async (_req, res) => {

@@ -65,10 +65,16 @@
             try{
                 const fd = new FormData();
                 fd.append('file', input.files[0]);
-                const r = await fetch(`${API_BASE}/api/trader/import/csv`, { method:'POST', headers: authHeadersNoContent(), body: fd });
-                if(!r.ok) throw new Error('bad');
-                const d = await r.json();
-                alert(`Imported ${d.imported} transactions.`);
+                // Dry-run preview first
+                const previewResp = await fetch(`${API_BASE}/api/trader/import/csv?dryRun=1`, { method:'POST', headers: authHeadersNoContent(), body: fd });
+                if(!previewResp.ok){ const er=await previewResp.json().catch(()=>({error:'Preview failed'})); alert(er.error||'Preview failed'); return; }
+                const preview = await previewResp.json();
+                const ok = confirm(`Preview valid rows: ${preview.totalValid}, errors: ${preview.totalErrors}. Proceed to import?`);
+                if(!ok) return;
+                const importResp = await fetch(`${API_BASE}/api/trader/import/csv`, { method:'POST', headers: authHeadersNoContent(), body: fd });
+                if(!importResp.ok){ const er=await importResp.json().catch(()=>({error:'Import failed'})); alert(er.error||'Import failed'); return; }
+                const done = await importResp.json();
+                alert(`Imported ${done.imported} transactions.`);
                 loadForecast();
             }catch{
                 alert('Import failed. Try again.');
