@@ -160,6 +160,21 @@ app.post('/api/2fa/recovery/regenerate', authMiddleware, async (req: any, res) =
   res.json({ recoveryCodes: codes });
 });
 
+// Auth: Change password
+app.post('/api/auth/change-password', authMiddleware, async (req: any, res) => {
+  const schema = z.object({ currentPassword: z.string().min(1), newPassword: z.string().min(8) });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid payload' });
+  const { currentPassword, newPassword } = parsed.data;
+  const user = await prisma.user.findUnique({ where: { id: req.userId } });
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+  const ok = await bcrypt.compare(currentPassword, user.passwordHash);
+  if (!ok) return res.status(400).json({ error: 'Current password incorrect' });
+  const hash = await bcrypt.hash(newPassword, 10);
+  await prisma.user.update({ where: { id: user.id }, data: { passwordHash: hash } });
+  res.json({ ok: true });
+});
+
 // Sessions
 app.get('/api/sessions', authMiddleware, async (req: any, res) => {
   const sessions = await prisma.session.findMany({ where: { userId: req.userId }, orderBy: { lastActive: 'desc' } });
