@@ -127,6 +127,19 @@
         }
 
         function exportPdf(){ window.open(`${API_BASE}/api/trader/report.pdf?ts=${Date.now()}`, '_blank'); }
+        function exportPdfWithParams(){
+            const startEl = document.getElementById('pdfStart');
+            const endEl = document.getElementById('pdfEnd');
+            const brandEl = document.getElementById('pdfBrand');
+            const start = startEl && startEl.value ? startEl.value : '';
+            const end = endEl && endEl.value ? endEl.value : '';
+            const brand = brandEl && brandEl.value ? brandEl.value.trim() : '';
+            const q = new URLSearchParams();
+            if(start) q.set('start', start);
+            if(end) q.set('end', end);
+            if(brand) q.set('brand', brand);
+            window.open(`${API_BASE}/api/trader/report.pdf?${q.toString()}`,'_blank');
+        }
 
         function logout(){
             localStorage.removeItem('authToken');
@@ -137,7 +150,12 @@
 
         document.addEventListener('DOMContentLoaded', checkAuth);
     </script>
-</head>
+    <style>
+        .input.small { padding: 6px 8px; font-size: 12px; }
+        .error-list { margin: 0; padding-left: 16px; }
+    </style>
+    
+    </head>
 <body>
     <header class="header">
         <div class="header-content">
@@ -199,9 +217,12 @@
             <div class="content-section">
                 <div class="section-header">
                     <h3><i class="fas fa-wallet"></i> Holdings</h3>
-                    <div>
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <input type="date" id="pdfStart" class="input small" />
+                        <input type="date" id="pdfEnd" class="input small" />
+                        <input type="text" id="pdfBrand" class="input small" placeholder="Brand (optional)" />
                         <button class="secondary-btn" onclick="loadForecast()"><i class="fas fa-sync-alt"></i> Refresh</button>
-                        <button class="primary-btn" onclick="exportPdf()"><i class="fas fa-file-pdf"></i> Export Tax PDF</button>
+                        <button class="primary-btn" onclick="exportPdfWithParams()"><i class="fas fa-file-pdf"></i> Export Tax PDF</button>
                     </div>
                 </div>
                 <div class="table-container">
