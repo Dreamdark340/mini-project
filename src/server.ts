@@ -6,6 +6,7 @@ import { PrismaClient } from '@prisma/client';
 import speakeasy from 'speakeasy';
 import { z } from 'zod';
 import rateLimit from 'express-rate-limit';
+import crypto from 'crypto';
 
 const prisma = new PrismaClient();
 const app = express();
@@ -20,9 +21,36 @@ const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_me';
 
 type JwtPayload = { sub: string };
 
-// In-memory wallet store (per user)
+// In-memory wallet store (per user) as fallback in dev
 type WalletTx = { id: string; userId: string; symbol: string; amount: number; priceUsd?: number; type: 'trade'|'staking'|'airdrop'|'mining'; timestamp: string; source?: string };
 const userIdToWalletTxs: Record<string, WalletTx[]> = Object.create(null);
+
+// Encryption helpers (AES-256-GCM) for sensitive wallet fields
+const ENC_KEY = (process.env.WALLET_ENC_KEY && Buffer.from(process.env.WALLET_ENC_KEY, 'base64').length === 32)
+  ? Buffer.from(process.env.WALLET_ENC_KEY, 'base64')
+  : Buffer.from('00000000000000000000000000000000', 'hex'); // dev-only key
+
+function encryptString(plaintext: string): string {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', ENC_KEY, iv);
+  const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return Buffer.concat([iv, tag, ciphertext]).toString('base64');
+}
+function decryptString(payloadB64: string): string {
+  const buf = Buffer.from(payloadB64, 'base64');
+  const iv = buf.subarray(0, 12);
+  const tag = buf.subarray(12, 28);
+  const ciphertext = buf.subarray(28);
+  const decipher = crypto.createDecipheriv('aes-256-gcm', ENC_KEY, iv);
+  decipher.setAuthTag(tag);
+  const out = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+  return out.toString('utf8');
+}
+
+function safeDecrypt(b64?: string | null): string | undefined {
+  try { return b64 ? JSON.parse(decryptString(b64)).source ?? 'enc' : undefined; } catch { return undefined; }
+}
 
 function signToken(userId: string) {
   return jwt.sign({ sub: userId } as JwtPayload, JWT_SECRET, { expiresIn: '7d' });
@@ -318,9 +346,12 @@ function generateEmployeeId() {
 
 // Trader APIs (stubs)
 app.get('/api/trader/forecast', authMiddleware, requireRole('trader', 'admin'), async (_req, res) => {
-  // Build from in-memory txs if available, else demo
+  // Build from DB if available; fall back to in-memory; else demo
   const reqAny = _req as any;
-  const txs = userIdToWalletTxs[reqAny.userId] || [];
+  const dbTxs = await prisma.walletTransaction.findMany({ where: { userId: reqAny.userId } });
+  const txs = (dbTxs.length > 0)
+    ? dbTxs.map(r => ({ id: r.id, userId: r.userId, symbol: r.symbol, amount: r.amount, priceUsd: (r.priceUsdCents ?? 0) / 100, type: (r.type as any), timestamp: r.timestamp.toISOString(), source: safeDecrypt(r.sourceEnc) }))
+    : (userIdToWalletTxs[reqAny.userId] || []);
   if (txs.length === 0) {
     return res.json({
       holdings: [
@@ -352,15 +383,19 @@ app.get('/api/trader/forecast', authMiddleware, requireRole('trader', 'admin'), 
 });
 
 app.post('/api/trader/import/csv', authMiddleware, requireRole('trader', 'admin'), async (_req, res) => {
-  // For now, just acknowledge receipt; in future accept multipart/form-data
+  // For now, import two sample rows but persist to Prisma with encrypted metadata
   const reqAny = _req as any;
-  const now = new Date().toISOString();
-  const sample: WalletTx[] = [
-    { id: `tx_${Date.now()}_1`, userId: reqAny.userId, symbol: 'BTC', amount: 0.1, priceUsd: 60000, type: 'trade', timestamp: now, source: 'CSV' },
-    { id: `tx_${Date.now()}_2`, userId: reqAny.userId, symbol: 'ETH', amount: 1.2, priceUsd: 3000, type: 'trade', timestamp: now, source: 'CSV' }
-  ];
-  userIdToWalletTxs[reqAny.userId] = (userIdToWalletTxs[reqAny.userId] || []).concat(sample);
-  res.json({ ok: true, imported: sample.length, message: 'Imported sample transactions (stub).' });
+  const now = new Date();
+  const metaEnc = encryptString(JSON.stringify({ source: 'CSV', importedAt: now.toISOString() }));
+  const created = await prisma.$transaction([
+    prisma.walletTransaction.create({ data: { userId: reqAny.userId, symbol: 'BTC', amount: 0.1, priceUsdCents: 60000 * 100, type: 'trade', timestamp: now, sourceEnc: metaEnc } }),
+    prisma.walletTransaction.create({ data: { userId: reqAny.userId, symbol: 'ETH', amount: 1.2, priceUsdCents: 3000 * 100, type: 'trade', timestamp: now, sourceEnc: metaEnc } })
+  ]);
+  // Mirror into in-memory store for current session demo
+  userIdToWalletTxs[reqAny.userId] = (userIdToWalletTxs[reqAny.userId] || []).concat(
+    created.map(c => ({ id: c.id, userId: c.userId, symbol: c.symbol, amount: c.amount, priceUsd: (c.priceUsdCents ?? 0) / 100, type: (c.type as any), timestamp: c.timestamp.toISOString(), source: 'CSV' }))
+  );
+  res.json({ ok: true, imported: created.length, message: 'Imported sample transactions (persisted).' });
 });
 
 app.get('/api/trader/report.pdf', authMiddleware, requireRole('trader', 'admin'), async (_req, res) => {
@@ -373,7 +408,8 @@ app.get('/api/trader/report.pdf', authMiddleware, requireRole('trader', 'admin')
 // List transactions (in-memory store)
 app.get('/api/trader/transactions', authMiddleware, requireRole('trader', 'admin'), async (_req, res) => {
   const reqAny = _req as any;
-  const items = userIdToWalletTxs[reqAny.userId] || [];
+  const rows = await prisma.walletTransaction.findMany({ where: { userId: reqAny.userId }, orderBy: { timestamp: 'desc' } });
+  const items: WalletTx[] = rows.map(r => ({ id: r.id, userId: r.userId, symbol: r.symbol, amount: r.amount, priceUsd: (r.priceUsdCents ?? 0) / 100, type: (r.type as any), timestamp: r.timestamp.toISOString(), source: safeDecrypt(r.sourceEnc) }));
   res.json({ transactions: items });
 });
 
@@ -381,7 +417,8 @@ app.get('/api/trader/transactions', authMiddleware, requireRole('trader', 'admin
 app.get('/api/trader/gains', authMiddleware, requireRole('trader', 'admin'), async (_req, res) => {
   const strategy = (typeof _req.query.strategy === 'string' ? _req.query.strategy : 'fifo').toLowerCase();
   const reqAny = _req as any;
-  const txs = (userIdToWalletTxs[reqAny.userId] || []).filter(t=>t.type==='trade');
+  const rows = await prisma.walletTransaction.findMany({ where: { userId: reqAny.userId, type: 'trade' } });
+  const txs: WalletTx[] = rows.map(r=>({ id: r.id, userId: r.userId, symbol: r.symbol, amount: r.amount, priceUsd: (r.priceUsdCents ?? 0)/100, type: 'trade', timestamp: r.timestamp.toISOString(), source: safeDecrypt(r.sourceEnc) }));
   // placeholder: $50 gain per trade, FIFO/LIFO just changes ordering count
   const sorted = [...txs].sort((a,b)=> strategy==='lifo' ? (a.timestamp<b.timestamp?1:-1) : (a.timestamp<b.timestamp?-1:1));
   const realizedGainsUsd = sorted.length * 50;
