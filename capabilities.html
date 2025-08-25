@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Platform Capabilities</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <header class="header">
+        <div class="header-content">
+            <h1><i class="fas fa-layer-group"></i> Platform Capabilities</h1>
+            <div class="user-info">
+                <a class="secondary-btn" href="login.html"><i class="fas fa-arrow-left"></i> Back</a>
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <i class="fas fa-book"></i>
+                <span>Overview</span>
+            </div>
+            <ul class="nav-links">
+                <li class="active"><a href="#auth"><i class="fas fa-user-shield"></i><span>Authentication</span></a></li>
+                <li><a href="#tenant"><i class="fas fa-building"></i><span>Multi-Tenant</span></a></li>
+                <li><a href="#dashboards"><i class="fas fa-gauge"></i><span>Dashboards</span></a></li>
+                <li><a href="#payroll"><i class="fas fa-file-invoice-dollar"></i><span>Payroll & Tax</span></a></li>
+                <li><a href="#ai"><i class="fas fa-brain"></i><span>AI Insights</span></a></li>
+                <li><a href="#security"><i class="fas fa-lock"></i><span>Security</span></a></li>
+                <li><a href="#docs"><i class="fas fa-book-open"></i><span>Docs & Onboarding</span></a></li>
+                <li><a href="#deploy"><i class="fas fa-rocket"></i><span>Deployment</span></a></li>
+                <li><a href="#tech"><i class="fas fa-code"></i><span>Languages & Structure</span></a></li>
+            </ul>
+        </aside>
+
+        <main class="main-content">
+            <div class="page-header">
+                <h2>Current Website Capabilities</h2>
+                <p>Reference for features, architecture, and technology choices.</p>
+            </div>
+
+            <div id="auth" class="content-section">
+                <div class="section-header"><h3><i class="fas fa-user-shield"></i> Authentication & Access Control</h3></div>
+                <ul>
+                    <li><strong>Login/Logout</strong>: Secure login with email and password</li>
+                    <li><strong>Password Reset Flow</strong>: Forgot password, email verification, secure reset</li>
+                    <li><strong>Two-Factor Authentication (2FA)</strong>: Enabled for Admin and HR roles</li>
+                    <li><strong>Role-Based Access</strong>: Admin, HR, Employee, Trader with tailored dashboards</li>
+                </ul>
+            </div>
+
+            <div id="tenant" class="content-section">
+                <div class="section-header"><h3><i class="fas fa-building"></i> Multi-Tenant Architecture</h3></div>
+                <ul>
+                    <li><strong>Tenant Isolation</strong>: Separate data silo per company</li>
+                    <li><strong>Custom Branding</strong>: Per-tenant logo and theme</li>
+                    <li><strong>Scoped Access</strong>: HR/Admins restricted to their tenant</li>
+                </ul>
+            </div>
+
+            <div id="dashboards" class="content-section">
+                <div class="section-header"><h3><i class="fas fa-gauge"></i> Dashboards & User Flows</h3></div>
+                <ul>
+                    <li><strong>Admin</strong>: Tenants, roles, audit logs, system settings</li>
+                    <li><strong>HR</strong>: Employees, payroll runs, tax summaries</li>
+                    <li><strong>Employee</strong>: Payslips, profile, leave requests</li>
+                    <li><strong>Trader</strong> (optional): Financial insights, transaction logs</li>
+                </ul>
+            </div>
+
+            <div id="payroll" class="content-section">
+                <div class="section-header"><h3><i class="fas fa-file-invoice-dollar"></i> Payroll & Tax Features</h3></div>
+                <ul>
+                    <li><strong>Payroll Processing</strong>: Salaries, deductions, bonuses</li>
+                    <li><strong>Tax Calculation</strong>: Region-specific rules</li>
+                    <li><strong>Payslip Generation</strong>: Downloadable PDFs</li>
+                    <li><strong>Payroll Schedule</strong>: Monthly/biweekly automation</li>
+                </ul>
+            </div>
+
+            <div id="ai" class="content-section">
+                <div class="section-header"><h3><i class="fas fa-brain"></i> AI-Powered Insights</h3></div>
+                <ul>
+                    <li><strong>Anomaly Detection</strong>: Flags unusual changes</li>
+                    <li><strong>Predictive Trends</strong>: Forecast salaries and taxes</li>
+                    <li><strong>Searchable Logs</strong>: Smart filters for audits</li>
+                </ul>
+            </div>
+
+            <div id="security" class="content-section">
+                <div class="section-header"><h3><i class="fas fa-lock"></i> Security & Compliance</h3></div>
+                <ul>
+                    <li><strong>Input Validation</strong>: Sanitized forms, CSRF protection</li>
+                    <li><strong>Encryption</strong>: Data at rest and in transit</li>
+                    <li><strong>Audit Logging</strong>: User actions, login attempts</li>
+                    <li><strong>Compliance</strong>: GDPR-ready and regional tax handling</li>
+                </ul>
+            </div>
+
+            <div id="docs" class="content-section">
+                <div class="section-header"><h3><i class="fas fa-book-open"></i> Documentation & Onboarding</h3></div>
+                <ul>
+                    <li><strong>User Guides</strong>: HR, Admin, Employee flows</li>
+                    <li><strong>Module Testing</strong>: Validated features with test cases</li>
+                    <li><strong>Training Materials</strong>: Error detection, platform usage</li>
+                </ul>
+            </div>
+
+            <div id="deploy" class="content-section">
+                <div class="section-header"><h3><i class="fas fa-rocket"></i> Deployment & Environment</h3></div>
+                <ul>
+                    <li><strong>Local Setup</strong>: XAMPP with PHP/MySQLi</li>
+                    <li><strong>Deployment Flow</strong>: Manual or semi-automated configs</li>
+                    <li><strong>Troubleshooting</strong>: Logs, errors, fallback flows</li>
+                </ul>
+            </div>
+
+            <div id="tech" class="content-section">
+                <div class="section-header"><h3><i class="fas fa-code"></i> Languages Used & File Structure</h3></div>
+                <div class="profile-field">
+<pre style="white-space: pre-wrap; margin: 0;">
+Frontend: HTML, CSS, JavaScript
+Backend: PHP (server logic), MySQLi (database)
+Security: PHP, .htaccess
+Documentation: Markdown, HTML
+
+Typical structure (XAMPP):
+/htdocs/
+├── index.php
+├── dashboard/
+│   ├── admin.php
+│   ├── hr.php
+│   ├── employee.php
+│   └── trader.php
+├── auth/
+│   ├── login.php
+│   ├── logout.php
+│   ├── reset_password.php
+│   └── 2fa.php
+├── includes/
+│   ├── db_connect.php
+│   ├── functions.php
+│   └── config.php
+├── assets/
+│   ├── css/
+│   ├── js/
+│   └── images/
+├── payroll/
+│   ├── process.php
+│   ├── payslip.php
+│   └── tax.php
+├── ai/
+│   ├── insights.php
+│   └── trends.php
+├── logs/
+│   └── audit.log
+├── docs/
+│   ├── README.md
+│   ├── onboarding.md
+│   └── error_detection.md
+</pre>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <footer>
+        <p>&copy; 2025 PayrollPro by Aaron | Reference</p>
+    </footer>
+</body>
+</html>
+
