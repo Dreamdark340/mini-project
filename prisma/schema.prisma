@@ -111,3 +111,13 @@ model Report {
   period     String
   createdAt  DateTime @default(now())
 }
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  companyId  String
+  actorId    String?
+  action     String
+  details    String?
+  level      String   @default("info") // info, warning, error
+  createdAt  DateTime @default(now())
+}
