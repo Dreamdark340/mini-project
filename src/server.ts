@@ -98,3 +98,15 @@ app.post('/api/hr/tax/preview', authMiddleware, requireRole('hr','admin'), async
 function randomCode(){ const alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; const rand=Array.from({ length:4 },()=> alphabet[Math.floor(Math.random()*alphabet.length)]).join(''); const rand2=Array.from({ length:4 },()=> alphabet[Math.floor(Math.random()*alphabet.length)]).join(''); return `${rand}-${rand2}`; }
 const port=process.env.PORT||4000; app.listen(port, ()=>{ console.log(`API listening on http://localhost:${port}`); });
 
+app.get('/api/admin/audit-logs', authMiddleware, requireRole('admin'), async (req: any, res) => {
+  const { level, action, q, take, skip } = req.query as { level?: string, action?: string, q?: string, take?: string, skip?: string };
+  const where: any = {};
+  if (level) where.level = level;
+  if (action) where.action = { contains: action, mode: 'insensitive' };
+  if (q) where.details = { contains: q, mode: 'insensitive' };
+  const limit = Math.min(parseInt(take || '50', 10) || 50, 200);
+  const offset = parseInt(skip || '0', 10) || 0;
+  const logs = await prisma.auditLog.findMany({ where, orderBy: { createdAt: 'desc' }, take: limit, skip: offset });
+  res.json({ logs });
+});
+
