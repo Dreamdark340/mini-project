@@ -6,17 +6,6 @@
   <title>Login - Payroll Management</title>
   <link rel="stylesheet" href="style.css">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-  <style>
-    .auth-wrap { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
-    .auth-card { width: 100%; max-width: 420px; background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; box-shadow: 0 10px 30px rgba(2,6,23,0.08); padding: 22px; }
-    .auth-header { text-align: center; margin-bottom: 14px; }
-    .auth-header h1 { margin: 0; font-size: 1.35rem; }
-    .brand { display: inline-flex; align-items: center; gap: 10px; margin-bottom: 6px; font-weight: 800; }
-    .hint { color: #64748b; font-size: 0.95rem; }
-    .error { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; padding: 10px 12px; border-radius: 10px; margin-bottom: 12px; display: none; }
-    .divider { display: flex; align-items: center; gap: 10px; color: #94a3b8; font-size: 0.9rem; margin: 12px 0; }
-    .divider::before, .divider::after { content: ""; height: 1px; width: 100%; background: #e5e7eb; }
-  </style>
   <script>
     // Base32 + util + TOTP
     const Base32 = (() => { const alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; const charToVal=Object.fromEntries([...alphabet].map((c,i)=>[c,i])); return { encode(bytes){let bits=0,value=0,out=''; for(let i=0;i<bytes.length;i++){ value=(value<<8)|bytes[i]; bits+=8; while(bits>=5){ out+=alphabet[(value>>>(bits-5))&31]; bits-=5; } } if(bits>0){ out+=alphabet[(value<<(5-bits))&31]; } return out; }, decode(str){ const clean=str.toUpperCase().replace(/=+$/,''); let bits=0,value=0; const out=[]; for(let i=0;i<clean.length;i++){ const ch=clean[i]; const val=charToVal[ch]; if(val===undefined) continue; value=(value<<5)|val; bits+=5; if(bits>=8){ out.push((value>>>(bits-8))&255); bits-=8; } } return new Uint8Array(out); } }; })();
@@ -65,7 +54,7 @@
       pendingUser=username;
       if(sec.twoFAEnabled){
         // Show 2FA step
-        document.getElementById('loginStep').style.display='none';
+        document.getElementById('loginForm').style.display='none';
         document.getElementById('twoFAStep').style.display='block';
         document.getElementById('twoFAUser').textContent=username;
         document.getElementById('recoveryCode').parentElement.style.display='none';
@@ -141,7 +130,7 @@
       <div id="errorBox" class="error"></div>
 
       <!-- Step 1: Credentials -->
-      <form id="loginForm" id="loginStep">
+      <form id="loginForm">
         <div class="form-group">
           <label for="username">Username</label>
           <input type="text" id="username" placeholder="e.g. aaron" autocomplete="username" required>

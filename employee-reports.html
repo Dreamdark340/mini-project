@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Reports - Payroll Management</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <script>
+    function logout(){ localStorage.removeItem('authToken'); localStorage.removeItem('userRole'); localStorage.removeItem('username'); window.location.href='login.html'; }
+    function checkAuth(){ const t=localStorage.getItem('authToken'); const r=localStorage.getItem('userRole'); const u=localStorage.getItem('username'); if(!t||!r||!u){ window.location.href='login.html'; return; } if(r!=='employee'){ window.location.href='login.html'; return; } document.getElementById('currentUser').innerHTML=`<span>${u}</span><span class="role-badge">Employee</span>`; document.body.classList.add('employee-theme'); }
+    document.addEventListener('DOMContentLoaded', checkAuth);
+  </script>
+</head>
+<body>
+  <header class="header">
+    <div class="header-content">
+      <h1><i class="fas fa-chart-line"></i> Payroll Management</h1>
+      <div class="user-info">
+        <span id="currentUser">Loading...</span>
+        <button onclick="logout()" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</button>
+      </div>
+    </div>
+  </header>
+  <div class="container">
+    <nav class="sidebar">
+      <div class="sidebar-header"><i class="fas fa-user-tie"></i><span>Employee Portal</span></div>
+      <ul class="nav-links">
+        <li><a href="employee-dashboard.html"><i class="fas fa-tachometer-alt"></i><span>Dashboard</span></a></li>
+        <li class="active"><a href="employee-reports.html"><i class="fas fa-file-alt"></i><span>My Reports</span></a></li>
+        <li><a href="employee-profile.html"><i class="fas fa-user-cog"></i><span>Profile</span></a></li>
+      </ul>
+    </nav>
+    <main class="main-content">
+      <div class="page-header"><h2><i class="fas fa-file-alt"></i> My Reports</h2><p>View and download your payroll reports.</p></div>
+      <div class="content-section">
+        <div class="section-header"><h3><i class="fas fa-folder-open"></i> Available Reports</h3></div>
+        <div class="table-container">
+          <table class="data-table">
+            <thead><tr><th>Date</th><th>Type</th><th>Period</th><th>Actions</th></tr></thead>
+            <tbody>
+              <tr><td>Mar 15, 2025</td><td>Payslip</td><td>Mar 1 - Mar 15</td><td><button class="secondary-btn small"><i class="fas fa-download"></i> Download</button></td></tr>
+              <tr><td>Feb 28, 2025</td><td>Payslip</td><td>Feb 16 - Feb 28</td><td><button class="secondary-btn small"><i class="fas fa-download"></i> Download</button></td></tr>
+              <tr><td>2024</td><td>Year-end Tax</td><td>2024</td><td><button class="secondary-btn small"><i class="fas fa-download"></i> Download</button></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+  <footer><p>&copy; 2025 PayrollPro by Aaron | Employee Portal</p></footer>
+</body>
+</html>
+
