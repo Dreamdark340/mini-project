@@ -65,20 +65,65 @@
             try{
                 const fd = new FormData();
                 fd.append('file', input.files[0]);
-                // Dry-run preview first
                 const previewResp = await fetch(`${API_BASE}/api/trader/import/csv?dryRun=1`, { method:'POST', headers: authHeadersNoContent(), body: fd });
                 if(!previewResp.ok){ const er=await previewResp.json().catch(()=>({error:'Preview failed'})); alert(er.error||'Preview failed'); return; }
                 const preview = await previewResp.json();
-                const ok = confirm(`Preview valid rows: ${preview.totalValid}, errors: ${preview.totalErrors}. Proceed to import?`);
-                if(!ok) return;
+                openPreviewModal(preview, input.files[0]);
+            }catch{
+                alert('Import failed. Try again.');
+            }
+        }
+
+        function openPreviewModal(preview, file){
+            window._pendingImportFile = file;
+            window._pendingPreview = preview;
+            document.getElementById('previewCounts').innerHTML = `
+                <strong>Valid rows:</strong> ${preview.totalValid} &nbsp;|&nbsp; <strong>Errors:</strong> ${preview.totalErrors}
+            `;
+            const tbody = document.getElementById('previewTableBody');
+            tbody.innerHTML = (preview.rows||[]).map(r=>`
+                <tr>
+                    <td>${r.row}</td>
+                    <td>${r.symbol}</td>
+                    <td>${r.amount}</td>
+                    <td>${r.price ?? ''}</td>
+                    <td>${r.type}</td>
+                    <td>${new Date(r.timestamp).toLocaleString()}</td>
+                </tr>
+            `).join('');
+            const errBox = document.getElementById('previewErrors');
+            if((preview.errors||[]).length === 0){ errBox.innerHTML = '<div class="small muted">No errors.</div>'; }
+            else {
+                const items = preview.errors.slice(0,100).map(e=>`<li>Row ${e.row}: ${e.message}</li>`).join('');
+                errBox.innerHTML = `<ul class="error-list">${items}</ul>`;
+            }
+            const btn = document.getElementById('commitImportBtn');
+            btn.disabled = (preview.totalValid||0) === 0;
+            document.getElementById('importPreviewModal').style.display = 'block';
+        }
+
+        async function commitImport(){
+            if(!window._pendingImportFile){ alert('No file to import.'); return; }
+            try{
+                const fd = new FormData();
+                fd.append('file', window._pendingImportFile);
                 const importResp = await fetch(`${API_BASE}/api/trader/import/csv`, { method:'POST', headers: authHeadersNoContent(), body: fd });
                 if(!importResp.ok){ const er=await importResp.json().catch(()=>({error:'Import failed'})); alert(er.error||'Import failed'); return; }
                 const done = await importResp.json();
+                closePreviewModal();
                 alert(`Imported ${done.imported} transactions.`);
                 loadForecast();
             }catch{
                 alert('Import failed. Try again.');
             }
+        }
+
+        function closePreviewModal(){
+            window._pendingImportFile = null;
+            window._pendingPreview = null;
+            document.getElementById('importPreviewModal').style.display = 'none';
+            document.getElementById('previewTableBody').innerHTML = '';
+            document.getElementById('previewErrors').innerHTML = '';
         }
 
         function exportPdf(){ window.open(`${API_BASE}/api/trader/report.pdf?ts=${Date.now()}`, '_blank'); }
@@ -185,7 +230,7 @@
                             <input type="file" id="csvFile" accept=".csv" required>
                         </div>
                     </div>
-                    <button type="submit" class="primary-btn"><i class="fas fa-upload"></i> Import</button>
+                    <button type="submit" class="primary-btn"><i class="fas fa-upload"></i> Preview</button>
                 </form>
             </div>
         </main>
@@ -193,6 +238,42 @@
     <footer>
         <p>&copy; 2025 PayrollPro by Aaron | Trader Portal</p>
     </footer>
+
+    <div id="importPreviewModal" class="modal">
+        <div class="modal-content" style="max-width: 900px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-eye"></i> Import Preview</h3>
+                <span class="close" onclick="closePreviewModal()">&times;</span>
+            </div>
+            <div class="content-section">
+                <div id="previewCounts" class="hint"></div>
+                <div class="table-container" style="max-height: 300px; overflow:auto;">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Asset</th>
+                                <th>Amount</th>
+                                <th>Price</th>
+                                <th>Type</th>
+                                <th>Timestamp</th>
+                            </tr>
+                        </thead>
+                        <tbody id="previewTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="content-section">
+                <div class="section-header">
+                    <h4><i class="fas fa-triangle-exclamation"></i> Errors</h4>
+                </div>
+                <div id="previewErrors" class="error" style="white-space: normal;"></div>
+            </div>
+            <div class="modal-actions" style="display:flex; gap:0.5rem; justify-content:flex-end;">
+                <button class="secondary-btn" onclick="closePreviewModal()">Cancel</button>
+                <button id="commitImportBtn" class="primary-btn" onclick="commitImport()"><i class="fas fa-check"></i> Import</button>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
-
