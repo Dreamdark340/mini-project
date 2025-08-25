@@ -39,6 +39,7 @@ model User {
   // relations
   sessions      Session[]
   payrolls      PayrollEntry[]
+  reports       Report[]
   taxProfile    EmployeeTaxProfile?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -99,4 +100,14 @@ model TaxSlab {
   minIncome    Int      // cents inclusive
   maxIncome    Int      // cents inclusive
   rateBps      Int      // basis points (e.g., 500 = 5%)
+}
+
+model Report {
+  id         String   @id @default(cuid())
+  user       User     @relation(fields: [userId], references: [id])
+  userId     String
+  companyId  String
+  type       String   // payslip, yearend, etc.
+  period     String
+  createdAt  DateTime @default(now())
 }

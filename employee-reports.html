@@ -45,10 +45,7 @@
         <div class="table-container">
           <table id="reportsTable" class="data-table">
             <thead><tr><th>Date</th><th>Type</th><th>Period</th><th>Actions</th></tr></thead>
-            <tbody>
-              <tr><td>Mar 15, 2025</td><td>Payslip</td><td>Mar 1 - Mar 15</td><td><button class="secondary-btn small"><i class="fas fa-download"></i> Download</button></td></tr>
-              <tr><td>Feb 28, 2025</td><td>Payslip</td><td>Feb 16 - Feb 28</td><td><button class="secondary-btn small"><i class="fas fa-download"></i> Download</button></td></tr>
-              <tr><td>2024</td><td>Year-end Tax</td><td>2024</td><td><button class="secondary-btn small"><i class="fas fa-download"></i> Download</button></td></tr>
+            <tbody id="reportsBody">
             </tbody>
           </table>
         </div>
@@ -61,31 +58,47 @@
   <script>
     const API_BASE = 'http://localhost:4000';
     function getToken(){ return localStorage.getItem('authToken'); }
+    function initTheme(){ const t=localStorage.getItem('theme')||'light'; if(t==='dark'){ document.documentElement.classList.add('dark'); } }
+    function toggleTheme(){ const r=document.documentElement; if(r.classList.contains('dark')){ r.classList.remove('dark'); localStorage.setItem('theme','light'); showToast('Light mode','success'); } else { r.classList.add('dark'); localStorage.setItem('theme','dark'); showToast('Dark mode','success'); } }
+    function toggleSidebar(){ document.body.classList.toggle('sidebar-open'); }
+    function showToast(message, type){ const c=document.getElementById('toastContainer'); if(!c) return; const el=document.createElement('div'); el.className=`toast ${type||''}`; el.innerHTML=`<i class=\"fas fa-info-circle\"></i><span>${message}</span><span class=\"close\" onclick=\"this.parentElement.remove()\">&times;</span>`; c.appendChild(el); setTimeout(()=>{ el.remove(); }, 3000); }
+    async function loadReports(){
+      const body = document.getElementById('reportsBody');
+      body.innerHTML = '<tr><td colspan="4" class="no-data">Loading...</td></tr>';
+      try{
+        const resp = await fetch(`${API_BASE}/api/reports`, { headers: { 'Authorization': `Bearer ${getToken()}` } });
+        if(!resp.ok) throw new Error();
+        const d = await resp.json();
+        const fmt = (dt)=> new Date(dt).toLocaleDateString();
+        const rows = (d.reports||[]).map(r=>{
+          const date = fmt(r.createdAt || Date.now());
+          const type = r.type === 'yearend' ? 'Year-end Tax' : 'Payslip';
+          const period = r.period || '';
+          return `<tr><td>${date}</td><td>${type}</td><td>${period}</td><td><button class=\"secondary-btn small\" data-id=\"${r.id}\"><i class=\"fas fa-download\"></i> Download</button></td></tr>`;
+        }).join('');
+        body.innerHTML = rows || '<tr><td colspan="4" class="no-data">No reports</td></tr>';
+        bindReportDownloads();
+      }catch{ body.innerHTML = '<tr><td colspan="4" class="no-data">Failed to load</td></tr>'; }
+    }
     function bindReportDownloads(){
       const table = document.getElementById('reportsTable');
       if(!table) return;
-      const rows = table.querySelectorAll('tbody tr');
-      rows.forEach(row => {
-        const btn = row.querySelector('button');
-        if(!btn) return;
-        btn.addEventListener('click', () => {
-          const dateStr = row.cells[0].textContent.trim();
-          const type = row.cells[1].textContent.trim();
-          const period = row.cells[2].textContent.trim();
-          downloadReportFromAPI(type, dateStr, period).catch(()=> generateReportPDF(type, dateStr, period));
+      table.querySelectorAll('button[data-id]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const id = btn.getAttribute('data-id');
+          downloadReportFromAPIById(id);
         });
       });
     }
     function money(n){ return `$${Number(n).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2})}`; }
     function sanitizeForFilename(s){ return s.replace(/[^a-z0-9_-]+/gi,'_'); }
-    async function downloadReportFromAPI(type, dateStr, period){
-      const id = `r_${sanitizeForFilename(type)}_${sanitizeForFilename(period||dateStr)}`;
+    async function downloadReportFromAPIById(id){
       const resp = await fetch(`${API_BASE}/api/reports/${id}/pdf`, { headers: { 'Authorization': `Bearer ${getToken()}` } });
       if(!resp.ok) throw new Error('api');
       const blob = await resp.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = `Payroll_${sanitizeForFilename(type)}_${sanitizeForFilename(period||dateStr)}.pdf`;
+      a.href = url; a.download = `Payroll_Report_${id}.pdf`;
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
     }
     function generateReportPDF(type, dateStr, period){
@@ -103,7 +116,6 @@
       doc.text(`Date: ${dateStr}`, 14, y); y += 6;
       doc.text(`Period: ${period}`, 14, y); y += 8;
       doc.setDrawColor(180); doc.line(14, y, 196, y); y += 8;
-      // Simple summary depending on type
       if(type.toLowerCase().includes('payslip')){
         const gross = 2500.00;
         const taxes = 500.00;
@@ -127,7 +139,7 @@
       const file = `Payroll_${sanitizeForFilename(type)}_${sanitizeForFilename(period||dateStr)}.pdf`;
       doc.save(file);
     }
-    document.addEventListener('DOMContentLoaded', bindReportDownloads);
+    document.addEventListener('DOMContentLoaded', ()=>{ initTheme(); loadReports(); });
   </script>
 </body>
 </html>
