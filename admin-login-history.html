@@ -14,6 +14,7 @@
             <h1><i class="fas fa-shield-alt"></i> Admin Console</h1>
             <div class="user-info">
                 <span id="currentUser">Loading...</span>
+                <button onclick="openHelp()" class="secondary-btn"><i class="fas fa-circle-question"></i> Help</button>
                 <button onclick="logout()" class="logout-btn">
                     <i class="fas fa-sign-out-alt"></i> Logout
                 </button>
@@ -82,6 +83,34 @@
     <footer>
         <p>&copy; 2025 PayrollPro by Aaron | Admin Portal</p>
     </footer>
+
+    <!-- Help Modal -->
+    <div id="helpModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-circle-info"></i> What this page does</h3>
+                <span class="close" onclick="closeHelp()">&times;</span>
+            </div>
+            <div style="padding: 14px 16px; display: grid; gap: 10px;">
+                <div class="profile-field">
+                    <strong>Login Events</strong>
+                    <ul>
+                        <li>Shows login time, username, role, IP, browser, status, and location.</li>
+                        <li>Use the filter box to search by username, IP, or location.</li>
+                        <li>Export results as CSV or clear all stored events.</li>
+                        <li>Only admins can access this page.</li>
+                    </ul>
+                </div>
+                <div class="profile-field">
+                    <strong>Notes</strong>
+                    <ul>
+                        <li>IP and location are fetched via public services for demo purposes.</li>
+                        <li>Events are stored in localStorage in this demo.</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <script>
         function checkAdminAuth() {
@@ -177,6 +206,9 @@
             URL.revokeObjectURL(url);
         }
 
+        function openHelp() { document.getElementById('helpModal').style.display = 'block'; }
+        function closeHelp() { document.getElementById('helpModal').style.display = 'none'; }
+
         function logout() {
             localStorage.removeItem('authToken');
             localStorage.removeItem('userRole');
@@ -189,6 +221,11 @@
             loadAndMigrate();
             renderEvents();
         });
+
+        window.onclick = function(event) {
+            const helpModal = document.getElementById('helpModal');
+            if (event.target === helpModal) closeHelp();
+        }
     </script>
 </body>
 <\/html>

@@ -15,6 +15,9 @@
             <h1><i class="fas fa-chart-line"></i> Payroll Management</h1>
             <div class="user-info">
                 <span id="currentUser">Loading...</span>
+                <button onclick="openHelp()" class="secondary-btn">
+                    <i class="fas fa-circle-question"></i> Help
+                </button>
                 <button onclick="logout()" class="logout-btn">
                     <i class="fas fa-sign-out-alt"></i> Logout
                 </button>
@@ -223,6 +226,34 @@
         <p>&copy; 2025 PayrollPro by Aaron | Employee Portal</p>
     </footer>
 
+    <!-- Help Modal -->
+    <div id="helpModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-circle-info"></i> What this page does</h3>
+                <span class="close" onclick="closeHelp()">&times;</span>
+            </div>
+            <div style="padding: 14px 16px; display: grid; gap: 10px;">
+                <div class="profile-field">
+                    <strong>Employee Profile</strong>
+                    <ul>
+                        <li>View your personal information and role.</li>
+                        <li>Click <em>Edit Profile</em> to update name, email, phone, department.</li>
+                        <li>Use <em>Change Password</em> to update your password (demo rules enforced).</li>
+                        <li>Login details (IP, browser, location) are hidden for employees and visible to admins only.</li>
+                    </ul>
+                </div>
+                <div class="profile-field">
+                    <strong>Where to find more</strong>
+                    <ul>
+                        <li>See <em>Capabilities</em> in the sidebar for a full platform overview.</li>
+                        <li>Need access details? Contact an administrator.</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
         let currentProfile = {};
 
@@ -350,6 +381,14 @@
             alert('Active sessions would be displayed here. This is a demo feature.');
         }
 
+        function openHelp() {
+            document.getElementById('helpModal').style.display = 'block';
+        }
+
+        function closeHelp() {
+            document.getElementById('helpModal').style.display = 'none';
+        }
+
         function logout() {
             localStorage.removeItem('authToken');
             localStorage.removeItem('userRole');
@@ -358,10 +397,10 @@
         }
 
         window.onclick = function(event) {
-            const modal = document.getElementById('editProfileModal');
-            if (event.target === modal) {
-                closeEditModal();
-            }
+            const editModal = document.getElementById('editProfileModal');
+            const helpModal = document.getElementById('helpModal');
+            if (event.target === editModal) closeEditModal();
+            if (event.target === helpModal) closeHelp();
         }
 
         document.addEventListener('DOMContentLoaded', checkAuth);
