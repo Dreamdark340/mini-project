@@ -206,8 +206,10 @@ app.get('/api/reports/:id/pdf', authMiddleware, async (_req, res) => {
 // HR Endpoints (hr or admin)
 app.get('/api/hr/employees', authMiddleware, requireRole('hr', 'admin'), async (req: any, res) => {
   const me = await prisma.user.findUnique({ where: { id: req.userId } });
+  const { companyId } = req.query as { companyId?: string };
+  const scopeCompanyId = me?.role === 'admin' && companyId ? companyId : me?.companyId;
   const employees = await prisma.user.findMany({
-    where: { companyId: me?.companyId },
+    where: { companyId: scopeCompanyId },
     select: { id: true, username: true, email: true, fullName: true, role: true, department: true, employeeId: true, lastLoginAt: true },
     orderBy: { username: 'asc' }
   });
@@ -215,16 +217,17 @@ app.get('/api/hr/employees', authMiddleware, requireRole('hr', 'admin'), async (
 });
 
 app.post('/api/hr/employees', authMiddleware, requireRole('hr', 'admin'), async (req: any, res) => {
-  const schema = z.object({ username: z.string(), email: z.string().email(), fullName: z.string(), department: z.string().optional(), role: z.enum(['employee', 'hr', 'admin']).default('employee'), password: z.string().min(6) });
+  const schema = z.object({ username: z.string(), email: z.string().email(), fullName: z.string(), department: z.string().optional(), role: z.enum(['employee', 'hr', 'admin']).default('employee'), password: z.string().min(6), companyId: z.string().optional() });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'Invalid payload' });
-  const { username, email, fullName, department, role, password } = parsed.data;
+  const { username, email, fullName, department, role, password, companyId } = parsed.data;
   const existing = await prisma.user.findFirst({ where: { OR: [{ username }, { email }] } });
   if (existing) return res.status(409).json({ error: 'User exists' });
   const hash = await bcrypt.hash(password, 10);
   const me = await prisma.user.findUnique({ where: { id: req.userId } });
+  const targetCompanyId = me?.role === 'admin' && companyId ? companyId : me!.companyId;
   const newEmp = await prisma.user.create({ data: {
-    username, email, fullName, department, role, passwordHash: hash, employeeId: generateEmployeeId(), companyId: me!.companyId
+    username, email, fullName, department, role, passwordHash: hash, employeeId: generateEmployeeId(), companyId: targetCompanyId
   }});
   res.status(201).json({ id: newEmp.id });
 });
