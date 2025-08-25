@@ -76,6 +76,15 @@ app.get('/health', async (_req, res) => {
       fullName: 'Alex Admin', department: 'Admin', employeeId: 'EMP9999', role: 'admin'
     }});
   }
+  // seed trader
+  const trader = await prisma.user.findUnique({ where: { username: 'trader1' } });
+  if (!trader) {
+    const hash = await bcrypt.hash('password', 10);
+    await prisma.user.create({ data: {
+      username: 'trader1', email: 'trader1@company.com', passwordHash: hash,
+      fullName: 'Taylor Trader', department: 'Trading', employeeId: 'EMP7001', role: 'trader'
+    }});
+  }
   res.json({ ok: true });
 });
 
@@ -221,7 +230,7 @@ app.get('/api/hr/employees', authMiddleware, requireRole('hr', 'admin'), async (
 });
 
 app.post('/api/hr/employees', authMiddleware, requireRole('hr', 'admin'), async (req, res) => {
-  const schema = z.object({ username: z.string(), email: z.string().email(), fullName: z.string(), department: z.string().optional(), role: z.enum(['employee', 'hr', 'admin']).default('employee'), password: z.string().min(6) });
+  const schema = z.object({ username: z.string(), email: z.string().email(), fullName: z.string(), department: z.string().optional(), role: z.enum(['employee', 'hr', 'admin', 'trader']).default('employee'), password: z.string().min(6) });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'Invalid payload' });
   const { username, email, fullName, department, role, password } = parsed.data;
@@ -235,7 +244,7 @@ app.post('/api/hr/employees', authMiddleware, requireRole('hr', 'admin'), async 
 });
 
 app.put('/api/hr/employees/:id/role', authMiddleware, requireRole('hr', 'admin'), async (req, res) => {
-  const schema = z.object({ role: z.enum(['employee', 'hr', 'admin']) });
+  const schema = z.object({ role: z.enum(['employee', 'hr', 'admin', 'trader']) });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'Invalid payload' });
   const { id } = req.params;
@@ -302,6 +311,33 @@ function generateEmployeeId() {
   const num = Math.floor(Math.random() * 9000) + 1000;
   return `EMP${num}`;
 }
+
+// Trader APIs (stubs)
+app.get('/api/trader/forecast', authMiddleware, requireRole('trader', 'admin'), async (_req, res) => {
+  // Placeholder forecast based on demo data
+  res.json({
+    holdings: [
+      { symbol: 'BTC', amount: 0.25, priceUsd: 65000, valueUsd: 16250 },
+      { symbol: 'ETH', amount: 3.5, priceUsd: 3200, valueUsd: 11200 }
+    ],
+    totalValueUsd: 27450,
+    realizedGainsYtdUsd: 1250,
+    unrealizedGainsUsd: 3450,
+    estimatedTaxUsd: 375
+  });
+});
+
+app.post('/api/trader/import/csv', authMiddleware, requireRole('trader', 'admin'), async (_req, res) => {
+  // For now, just acknowledge receipt; in future accept multipart/form-data
+  res.json({ ok: true, imported: 0, message: 'CSV import stub. Implement parsing later.' });
+});
+
+app.get('/api/trader/report.pdf', authMiddleware, requireRole('trader', 'admin'), async (_req, res) => {
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', 'attachment; filename="crypto_tax_report.pdf"');
+  const pdf = Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF');
+  res.end(pdf);
+});
 
 const port = process.env.PORT || 4000;
 app.listen(port, () => {

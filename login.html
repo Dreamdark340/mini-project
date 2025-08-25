@@ -87,7 +87,13 @@
       const key=`loginHistory_${username}`; const ua=navigator.userAgent; const now=new Date().toISOString();
       const hist=JSON.parse(localStorage.getItem(key) || '[]'); hist.unshift({ timestamp: now, ipAddress: 'Unknown', device: ua, status: 'Success', location: 'Unknown' }); localStorage.setItem(key, JSON.stringify(hist.slice(0,50)));
       const role = (user?.role||'employee').toLowerCase();
-      if(role === 'hr' || role === 'admin'){ window.location.href='hr-dashboard.html'; } else { window.location.href='employee-profile.html'; }
+      if(role === 'hr' || role === 'admin'){
+        window.location.href='hr-dashboard.html';
+      } else if (role === 'trader') {
+        window.location.href='trader-dashboard.html';
+      } else {
+        window.location.href='employee-profile.html';
+      }
     }
 
     async function pingHealth(){
@@ -110,6 +116,7 @@
         if(v==='employee'){ document.getElementById('username').value='aaron'; document.getElementById('password').value='password'; }
         else if(v==='hr'){ document.getElementById('username').value='hr1'; document.getElementById('password').value='password'; }
         else if(v==='admin'){ document.getElementById('username').value='admin'; document.getElementById('password').value='admin123'; }
+        else if(v==='trader'){ document.getElementById('username').value='trader1'; document.getElementById('password').value='password'; }
         else { document.getElementById('username').value=''; document.getElementById('password').value=''; }
       });
     }
@@ -136,6 +143,7 @@
             <option value="employee">Employee (aaron/password)</option>
             <option value="hr">HR (hr1/password)</option>
             <option value="admin">Admin (admin/admin123)</option>
+            <option value="trader">Trader (trader1/password)</option>
           </select>
         </div>
         <div class="form-group">
