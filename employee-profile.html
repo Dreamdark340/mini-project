@@ -332,6 +332,56 @@
         }
         function refreshLoginHistory() { loadLoginHistory(); }
 
+        // Tax profile + forecast
+        async function loadTax() {
+            try{
+                const token = localStorage.getItem('authToken');
+                const headers = { 'Authorization': `Bearer ${token}` };
+                const forecastResp = await fetch(`${API_BASE}/api/tax/forecast`, { headers });
+                if (forecastResp.ok) {
+                    const f = await forecastResp.json();
+                    document.getElementById('taxRegime').textContent = f.regime.toUpperCase();
+                    document.getElementById('taxGross').textContent = `$${(f.gross/100).toFixed(2)}`;
+                    document.getElementById('taxDeductions').textContent = `$${(f.deductions/100).toFixed(2)}`;
+                    document.getElementById('taxTaxable').textContent = `$${(f.taxable/100).toFixed(2)}`;
+                    document.getElementById('taxMonthlyTDS').textContent = `$${(f.projectedMonthlyTDS/100).toFixed(2)}`;
+                }
+                const profileResp = await fetch(`${API_BASE}/api/tax/profile`, { headers });
+                if (profileResp.ok) {
+                    const d = await profileResp.json();
+                    const p = d.profile || {};
+                    document.getElementById('panInput').value = p.pan || '';
+                    document.getElementById('regimeInput').value = (p.regime || 'old');
+                    document.getElementById('s80cInput').value = p.section80C ? (p.section80C/100).toFixed(2) : '';
+                    document.getElementById('hraInput').value = p.hraExempt ? (p.hraExempt/100).toFixed(2) : '';
+                    document.getElementById('ltaInput').value = p.ltaExempt ? (p.ltaExempt/100).toFixed(2) : '';
+                }
+            }catch{}
+        }
+        async function saveTaxProfile(e){
+            e.preventDefault();
+            const payload = {
+                pan: document.getElementById('panInput').value || undefined,
+                regime: document.getElementById('regimeInput').value,
+                section80C: Math.round(parseFloat(document.getElementById('s80cInput').value||'0')*100),
+                hraExempt: Math.round(parseFloat(document.getElementById('hraInput').value||'0')*100),
+                ltaExempt: Math.round(parseFloat(document.getElementById('ltaInput').value||'0')*100)
+            };
+            try{
+                const resp = await fetch(`${API_BASE}/api/tax/profile`, { method:'PUT', headers: authHeaders(), body: JSON.stringify(payload) });
+                if(!resp.ok) throw new Error();
+                alert('Saved tax profile');
+                loadTax();
+            }catch{ alert('Failed to save tax profile'); }
+        }
+        function downloadForm16(){
+            const year = new Date().getFullYear();
+            fetch(`${API_BASE}/api/tax/form16/${year}/pdf`, { headers: authHeaders() })
+                .then(r => r.blob())
+                .then(b => { const url = URL.createObjectURL(b); const a = document.createElement('a'); a.href=url; a.download=`Form16_${year}.pdf`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); })
+                .catch(()=> alert('Failed to download Form 16'));
+        }
+
         // 2FA UI and logic
         function refreshSecurityUI() {
             const sec = { twoFAEnabled: !!currentProfile.twoFAEnabled };
@@ -692,6 +742,34 @@
                 </div>
             </div>
 
+            <!-- Tax & TDS -->
+            <div class="content-section">
+                <div class="section-header">
+                    <h3><i class="fas fa-receipt"></i> Tax & TDS</h3>
+                    <button onclick="downloadForm16()" class="secondary-btn"><i class="fas fa-file-pdf"></i> Download Form 16</button>
+                </div>
+                <div class="profile-grid">
+                    <div class="profile-field"><label>Regime:</label><span id="taxRegime">Loading...</span></div>
+                    <div class="profile-field"><label>Gross (YTD):</label><span id="taxGross">Loading...</span></div>
+                    <div class="profile-field"><label>Deductions (YTD):</label><span id="taxDeductions">Loading...</span></div>
+                    <div class="profile-field"><label>Taxable (YTD):</label><span id="taxTaxable">Loading...</span></div>
+                    <div class="profile-field"><label>Projected Monthly TDS:</label><span id="taxMonthlyTDS">Loading...</span></div>
+                </div>
+                <div style="margin-top:10px;">
+                    <form onsubmit="saveTaxProfile(event)">
+                        <div class="form-grid">
+                            <div class="form-group"><label>PAN</label><input id="panInput" placeholder="ABCDE1234F"></div>
+                            <div class="form-group"><label>Regime</label><select id="regimeInput"><option value="old">Old</option><option value="new">New</option></select></div>
+                            <div class="form-group"><label>Section 80C ($)</label><input id="s80cInput" type="number" step="0.01" min="0"></div>
+                            <div class="form-group"><label>HRA Exempt ($)</label><input id="hraInput" type="number" step="0.01" min="0"></div>
+                            <div class="form-group"><label>LTA Exempt ($)</label><input id="ltaInput" type="number" step="0.01" min="0"></div>
+                        </div>
+                        <div class="modal-actions" style="justify-content:flex-end;">
+                            <button class="primary-btn" type="submit"><i class="fas fa-save"></i> Save Tax Profile</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
             <!-- Account Security -->
             <div class="content-section">
                 <div class="section-header">

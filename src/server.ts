@@ -290,6 +290,80 @@ app.get('/api/payslips/:id/pdf', authMiddleware, async (req: any, res) => {
   res.end(pdf);
 });
 
+// ===== Tax Engine =====
+function computeTDS(annualTaxableCents: number, slabs: { minIncome: number; maxIncome: number; rateBps: number }[]) {
+  let tax = 0;
+  for (const s of slabs) {
+    const lower = s.minIncome;
+    const upper = isNaN(s.maxIncome as any) || s.maxIncome === 0 ? Number.MAX_SAFE_INTEGER : s.maxIncome;
+    if (annualTaxableCents > lower) {
+      const taxableBand = Math.min(annualTaxableCents, upper) - lower;
+      if (taxableBand > 0) tax += Math.floor((taxableBand * s.rateBps) / 10000);
+    }
+  }
+  return tax;
+}
+
+// Admin: Tax Slabs
+app.get('/api/admin/tax/slabs', authMiddleware, requireRole('admin'), async (_req, res) => {
+  const slabs = await prisma.taxSlab.findMany({ orderBy: [{ regime: 'asc' }, { minIncome: 'asc' }] });
+  res.json({ slabs });
+});
+app.post('/api/admin/tax/slabs', authMiddleware, requireRole('admin'), async (req: any, res) => {
+  const schema = z.object({ companyId: z.string(), regime: z.enum(['old','new']), minIncome: z.number().int().nonnegative(), maxIncome: z.number().int().nonnegative(), rateBps: z.number().int().nonnegative() });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid payload' });
+  const slab = await prisma.taxSlab.create({ data: parsed.data });
+  res.status(201).json({ id: slab.id });
+});
+
+// Employee tax profile
+app.get('/api/tax/profile', authMiddleware, async (req: any, res) => {
+  const user = await prisma.user.findUnique({ where: { id: req.userId }, include: { taxProfile: true } });
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+  if (!user.taxProfile) {
+    const created = await prisma.employeeTaxProfile.create({ data: { userId: user.id, companyId: user.companyId } });
+    return res.json({ profile: created });
+  }
+  res.json({ profile: user.taxProfile });
+});
+app.put('/api/tax/profile', authMiddleware, async (req: any, res) => {
+  const schema = z.object({ pan: z.string().optional(), regime: z.enum(['old','new']).optional(), section80C: z.number().int().nonnegative().optional(), hraExempt: z.number().int().nonnegative().optional(), ltaExempt: z.number().int().nonnegative().optional() });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid payload' });
+  const me = await prisma.user.findUnique({ where: { id: req.userId } });
+  if (!me) return res.status(401).json({ error: 'Unauthorized' });
+  const existing = await prisma.employeeTaxProfile.findUnique({ where: { userId: me.id } });
+  const updated = existing
+    ? await prisma.employeeTaxProfile.update({ where: { userId: me.id }, data: parsed.data })
+    : await prisma.employeeTaxProfile.create({ data: { userId: me.id, companyId: me.companyId, ...(parsed.data as any) } });
+  res.json({ profile: updated });
+});
+
+// Forecast
+app.get('/api/tax/forecast', authMiddleware, async (req: any, res) => {
+  const me = await prisma.user.findUnique({ where: { id: req.userId } });
+  if (!me) return res.status(401).json({ error: 'Unauthorized' });
+  const profile = await prisma.employeeTaxProfile.findUnique({ where: { userId: me.id } });
+  const slabs = await prisma.taxSlab.findMany({ where: { companyId: me.companyId, regime: profile?.regime || 'old' } });
+  const entries = await prisma.payrollEntry.findMany({ where: { userId: me.id, companyId: me.companyId } });
+  const gross = entries.reduce((s, e) => s + e.baseSalary + e.bonus, 0);
+  const deductions = entries.reduce((s, e) => s + e.deductions, 0) + (profile?.section80C || 0) + (profile?.hraExempt || 0) + (profile?.ltaExempt || 0);
+  const taxable = Math.max(0, gross - deductions);
+  const annualTax = computeTDS(taxable, slabs);
+  const months = new Set(entries.map(e => new Date(e.periodEnd).getMonth())).size || 1;
+  const projectedMonthlyTDS = Math.floor(annualTax / 12);
+  res.json({ gross, deductions, taxable, annualTax, projectedMonthlyTDS, regime: profile?.regime || 'old' });
+});
+
+// Form 16 PDF placeholder
+app.get('/api/tax/form16/:year/pdf', authMiddleware, async (req: any, res) => {
+  const { year } = req.params;
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="Form16_${year}.pdf"`);
+  const pdf = Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF');
+  res.end(pdf);
+});
 // Admin: Companies
 app.get('/api/admin/companies', authMiddleware, requireRole('admin'), async (_req, res) => {
   const companies = await prisma.company.findMany({ orderBy: { name: 'asc' } });

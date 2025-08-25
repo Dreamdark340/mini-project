@@ -39,6 +39,7 @@ model User {
   // relations
   sessions      Session[]
   payrolls      PayrollEntry[]
+  taxProfile    EmployeeTaxProfile?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 }
@@ -75,4 +76,27 @@ model PayrollEntry {
   deductions   Int      // cents
   netPay       Int      // cents
   createdAt    DateTime @default(now())
+}
+
+model EmployeeTaxProfile {
+  id           String   @id @default(cuid())
+  user         User     @relation(fields: [userId], references: [id])
+  userId       String   @unique
+  companyId    String
+  pan          String?
+  regime       String   @default("old") // old/new
+  section80C   Int      @default(0) // cents
+  hraExempt    Int      @default(0) // cents
+  ltaExempt    Int      @default(0) // cents
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model TaxSlab {
+  id           String   @id @default(cuid())
+  companyId    String
+  regime       String   // old/new
+  minIncome    Int      // cents inclusive
+  maxIncome    Int      // cents inclusive
+  rateBps      Int      // basis points (e.g., 500 = 5%)
 }
