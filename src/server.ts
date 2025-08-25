@@ -7,6 +7,8 @@ import speakeasy from 'speakeasy';
 import { z } from 'zod';
 import rateLimit from 'express-rate-limit';
 import crypto from 'crypto';
+import multer from 'multer';
+import { parse } from 'csv-parse/sync';
 
 const prisma = new PrismaClient();
 const app = express();
@@ -16,6 +18,7 @@ app.use(express.json());
 const authLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 50 });
 app.use('/api/auth', authLimiter);
 app.use('/api/2fa', authLimiter);
+const upload = multer({ limits: { fileSize: 10 * 1024 * 1024 } });
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_me';
 
@@ -50,6 +53,36 @@ function decryptString(payloadB64: string): string {
 
 function safeDecrypt(b64?: string | null): string | undefined {
   try { return b64 ? JSON.parse(decryptString(b64)).source ?? 'enc' : undefined; } catch { return undefined; }
+}
+
+function detectFormat(lowerHeaders: string[]): { symbol: string; type: string; amount: string; price?: string; timestamp: string } | null {
+  // Supported schemas (lower-cased header names):
+  // 1) generic: symbol,type,amount,price,timestamp
+  // 2) binance-like: date, market (BTCUSDT), type, price, amount
+  // 3) coinbase-like: timestamp, transaction type, asset, quantity transacted, spot price at transaction
+  const h = (name: string) => lowerHeaders.indexOf(name);
+  // Generic
+  if (h('symbol')>=0 && h('type')>=0 && h('amount')>=0 && h('timestamp')>=0) {
+    return { symbol: lowerHeaders[h('symbol')], type: lowerHeaders[h('type')], amount: lowerHeaders[h('amount')], price: h('price')>=0? lowerHeaders[h('price')]: undefined, timestamp: lowerHeaders[h('timestamp')] };
+  }
+  // Binance-like
+  if (h('date')>=0 && h('market')>=0 && h('type')>=0 && h('price')>=0 && h('amount')>=0) {
+    return { symbol: lowerHeaders[h('market')], type: lowerHeaders[h('type')], amount: lowerHeaders[h('amount')], price: lowerHeaders[h('price')], timestamp: lowerHeaders[h('date')] };
+  }
+  // Coinbase-like
+  if (h('timestamp')>=0 && h('transaction type')>=0 && h('asset')>=0 && h('quantity transacted')>=0 && h('spot price at transaction')>=0) {
+    return { symbol: lowerHeaders[h('asset')], type: lowerHeaders[h('transaction type')], amount: lowerHeaders[h('quantity transacted')], price: lowerHeaders[h('spot price at transaction')], timestamp: lowerHeaders[h('timestamp')] };
+  }
+  return null;
+}
+
+function normalizeType(raw: string): 'trade'|'staking'|'airdrop'|'mining' {
+  const t = raw.toLowerCase();
+  if (['buy','sell','trade','spot','swap'].includes(t)) return 'trade';
+  if (['stake','staking','reward'].includes(t)) return 'staking';
+  if (['airdrop','gift'].includes(t)) return 'airdrop';
+  if (['mine','mining'].includes(t)) return 'mining';
+  return 'trade';
 }
 
 function signToken(userId: string) {
@@ -382,20 +415,47 @@ app.get('/api/trader/forecast', authMiddleware, requireRole('trader', 'admin'), 
   res.json({ holdings, totalValueUsd, realizedGainsYtdUsd, unrealizedGainsUsd, estimatedTaxUsd });
 });
 
-app.post('/api/trader/import/csv', authMiddleware, requireRole('trader', 'admin'), async (_req, res) => {
-  // For now, import two sample rows but persist to Prisma with encrypted metadata
-  const reqAny = _req as any;
-  const now = new Date();
-  const metaEnc = encryptString(JSON.stringify({ source: 'CSV', importedAt: now.toISOString() }));
-  const created = await prisma.$transaction([
-    prisma.walletTransaction.create({ data: { userId: reqAny.userId, symbol: 'BTC', amount: 0.1, priceUsdCents: 60000 * 100, type: 'trade', timestamp: now, sourceEnc: metaEnc } }),
-    prisma.walletTransaction.create({ data: { userId: reqAny.userId, symbol: 'ETH', amount: 1.2, priceUsdCents: 3000 * 100, type: 'trade', timestamp: now, sourceEnc: metaEnc } })
-  ]);
-  // Mirror into in-memory store for current session demo
-  userIdToWalletTxs[reqAny.userId] = (userIdToWalletTxs[reqAny.userId] || []).concat(
-    created.map(c => ({ id: c.id, userId: c.userId, symbol: c.symbol, amount: c.amount, priceUsd: (c.priceUsdCents ?? 0) / 100, type: (c.type as any), timestamp: c.timestamp.toISOString(), source: 'CSV' }))
+app.post('/api/trader/import/csv', authMiddleware, requireRole('trader', 'admin'), upload.single('file'), async (req: any, res) => {
+  if (!req.file || !req.file.buffer) return res.status(400).json({ error: 'CSV file is required' });
+  const csv = req.file.buffer.toString('utf8');
+  let records: any[];
+  try {
+    records = parse(csv, { columns: true, skip_empty_lines: true, trim: true });
+  } catch {
+    return res.status(400).json({ error: 'Invalid CSV format' });
+  }
+  if (!Array.isArray(records) || records.length === 0) return res.status(400).json({ error: 'No rows found' });
+  // Detect columns
+  const header = Object.keys(records[0]).map(k=>k.toLowerCase());
+  const mapping = detectFormat(header);
+  if (!mapping) return res.status(400).json({ error: 'Unsupported CSV format' });
+  // Validate and transform rows
+  const errors: string[] = [];
+  const txs: { symbol: string; amount: number; priceUsdCents?: number; type: string; timestamp: Date; sourceEnc?: string }[] = [];
+  for (let i=0; i<records.length; i++) {
+    const r = records[i];
+    const rowNum = i + 2; // +1 header, +1 1-indexed
+    const symbol = String(r[mapping.symbol]).toUpperCase();
+    const type = normalizeType(String(r[mapping.type]));
+    const amount = parseFloat(String(r[mapping.amount]));
+    const price = mapping.price ? parseFloat(String(r[mapping.price])) : undefined;
+    const timeRaw = String(r[mapping.timestamp]);
+    const timestamp = new Date(timeRaw);
+    if (!symbol || !/^[A-Z0-9]{2,10}$/.test(symbol)) errors.push(`Row ${rowNum}: invalid symbol`);
+    if (!['trade','staking','airdrop','mining'].includes(type)) errors.push(`Row ${rowNum}: invalid type`);
+    if (!Number.isFinite(amount)) errors.push(`Row ${rowNum}: invalid amount`);
+    if (mapping.price && !Number.isFinite(price as number)) errors.push(`Row ${rowNum}: invalid price`);
+    if (isNaN(timestamp.getTime())) errors.push(`Row ${rowNum}: invalid timestamp`);
+    if (errors.length === 0) {
+      txs.push({ symbol, amount, priceUsdCents: price !== undefined ? Math.round((price as number) * 100) : undefined, type, timestamp, sourceEnc: encryptString(JSON.stringify({ source: 'CSV' })) });
+    }
+  }
+  if (errors.length > 0) return res.status(400).json({ error: 'Validation failed', details: errors.slice(0, 50) });
+  // Persist
+  const created = await prisma.$transaction(
+    txs.map(t => prisma.walletTransaction.create({ data: { userId: req.userId, symbol: t.symbol, amount: t.amount, priceUsdCents: t.priceUsdCents, type: t.type, timestamp: t.timestamp, sourceEnc: t.sourceEnc } }))
   );
-  res.json({ ok: true, imported: created.length, message: 'Imported sample transactions (persisted).' });
+  res.json({ ok: true, imported: created.length });
 });
 
 app.get('/api/trader/report.pdf', authMiddleware, requireRole('trader', 'admin'), async (_req, res) => {
