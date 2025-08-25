@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Profile - Payroll Management</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="./common.js"></script>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-content">
+            <h1><i class="fas fa-chart-line"></i> Payroll Management</h1>
+            <div class="user-info">
+                <span id="currentUser">Loading...</span>
+                <button onclick="logout()" class="logout-btn">
+                    <i class="fas fa-sign-out-alt"></i> Logout
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- Sidebar -->
+        <nav class="sidebar">
+            <div class="sidebar-header">
+                <i class="fas fa-user-tie"></i>
+                <span>Employee Portal</span>
+            </div>
+            <ul class="nav-links">
+                <li>
+                    <a href="employee-dashboard.html">
+                        <i class="fas fa-tachometer-alt"></i>
+                        <span>Dashboard</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="employee-reports.html">
+                        <i class="fas fa-file-alt"></i>
+                        <span>My Reports</span>
+                    </a>
+                </li>
+                <li class="active">
+                    <a href="employee-profile.html">
+                        <i class="fas fa-user-cog"></i>
+                        <span>Profile</span>
+                    </a>
+                </li>
+            </ul>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <div class="page-header">
+                <h2><i class="fas fa-user-cog"></i> My Profile</h2>
+                <p>Manage your personal information and account settings.</p>
+            </div>
+
+            <!-- Profile Information -->
+            <div class="content-section">
+                <div class="section-header">
+                    <h3><i class="fas fa-user"></i> Personal Information</h3>
+                    <button onclick="editProfile()" class="primary-btn" id="editProfileBtn">
+                        <i class="fas fa-edit"></i> Edit Profile
+                    </button>
+                </div>
+                <div class="profile-grid">
+                    <div class="profile-field">
+                        <label>Full Name:</label>
+                        <span id="profileName">Loading...</span>
+                    </div>
+                    <div class="profile-field">
+                        <label>Username:</label>
+                        <span id="profileUsername">Loading...</span>
+                    </div>
+                    <div class="profile-field">
+                        <label>Email:</label>
+                        <span id="profileEmail">Loading...</span>
+                    </div>
+                    <div class="profile-field">
+                        <label>Phone:</label>
+                        <span id="profilePhone">Loading...</span>
+                    </div>
+                    <div class="profile-field">
+                        <label>Department:</label>
+                        <span id="profileDepartment">Loading...</span>
+                    </div>
+                    <div class="profile-field">
+                        <label>Role:</label>
+                        <span id="profileRole">Loading...</span>
+                    </div>
+                    <div class="profile-field">
+                        <label>Employee ID:</label>
+                        <span id="profileEmployeeId">Loading...</span>
+                    </div>
+                    <div class="profile-field">
+                        <label>Last Login:</label>
+                        <span id="profileLastLogin">Loading...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Edit Profile Modal -->
+            <div id="editProfileModal" class="modal">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h3><i class="fas fa-user-edit"></i> Edit Profile</h3>
+                        <span class="close" onclick="closeEditModal()">&times;</span>
+                    </div>
+                    <form id="editProfileForm" onsubmit="saveProfile(event)">
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="editName">Full Name:</label>
+                                <input type="text" id="editName" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="editEmail">Email:</label>
+                                <input type="email" id="editEmail" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="editPhone">Phone:</label>
+                                <input type="tel" id="editPhone">
+                            </div>
+                            <div class="form-group">
+                                <label for="editDepartment">Department:</label>
+                                <input type="text" id="editDepartment">
+                            </div>
+                        </div>
+                        <div class="modal-actions">
+                            <button type="button" onclick="closeEditModal()" class="secondary-btn">Cancel</button>
+                            <button type="submit" class="primary-btn">Save Changes</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Change Password -->
+            <div class="content-section">
+                <div class="section-header">
+                    <h3><i class="fas fa-lock"></i> Change Password</h3>
+                </div>
+                <form id="changePasswordForm" onsubmit="changePassword(event)" class="password-form">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="currentPassword">Current Password:</label>
+                            <input type="password" id="currentPassword" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="newPassword">New Password:</label>
+                            <input type="password" id="newPassword" required minlength="8">
+                        </div>
+                        <div class="form-group">
+                            <label for="confirmPassword">Confirm New Password:</label>
+                            <input type="password" id="confirmPassword" required minlength="8">
+                        </div>
+                    </div>
+                    <div class="password-requirements">
+                        <p><strong>Password Requirements:</strong></p>
+                        <ul>
+                            <li>Minimum 8 characters</li>
+                            <li>At least one uppercase letter</li>
+                            <li>At least one lowercase letter</li>
+                            <li>At least one number</li>
+                        </ul>
+                    </div>
+                    <button type="submit" class="primary-btn">
+                        <i class="fas fa-key"></i> Change Password
+                    </button>
+                </form>
+            </div>
+
+            <!-- Login History (Restricted) -->
+            <div class="content-section">
+                <div class="section-header">
+                    <h3><i class="fas fa-history"></i> Login History</h3>
+                </div>
+                <div class="restricted-box">
+                    <i class="fas fa-lock"></i>
+                    <p>Detailed login information (IP, browser, location, timestamps) is restricted and only accessible by administrators.</p>
+                    <p class="muted">If you have concerns about account access, please contact your administrator.</p>
+                </div>
+            </div>
+
+            <!-- Account Security -->
+            <div class="content-section">
+                <div class="section-header">
+                    <h3><i class="fas fa-shield-alt"></i> Account Security</h3>
+                </div>
+                <div class="security-options">
+                    <div class="security-option">
+                        <div class="security-info">
+                            <h4>Two-Factor Authentication</h4>
+                            <p>Add an extra layer of security to your account</p>
+                        </div>
+                        <button class="secondary-btn" onclick="enable2FA()">
+                            <i class="fas fa-mobile-alt"></i> Enable 2FA
+                        </button>
+                    </div>
+                    <div class="security-option">
+                        <div class="security-info">
+                            <h4>Session Management</h4>
+                            <p>View and manage active sessions</p>
+                        </div>
+                        <button class="secondary-btn" onclick="viewSessions()">
+                            <i class="fas fa-desktop"></i> View Sessions
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    
+    <!-- Footer -->
+    <footer>
+        <p>&copy; 2025 PayrollPro by Aaron | Employee Portal</p>
+    </footer>
+
+    <script>
+        let currentProfile = {};
+
+        function checkAuth() {
+            const token = localStorage.getItem('authToken');
+            const userRole = localStorage.getItem('userRole');
+            const username = localStorage.getItem('username');
+            
+            if (!token || !userRole || !username) {
+                window.location.href = 'login.html';
+                return;
+            }
+            
+            if (userRole !== 'employee') {
+                alert('Access denied. Employee privileges required.');
+                window.location.href = 'login.html';
+                return;
+            }
+            
+            document.body.classList.add('employee-theme');
+            document.getElementById('currentUser').innerHTML = `
+                <span>${username}</span>
+                <span class="role-badge">Employee</span>
+            `;
+
+            // Optionally record the first session login once per token
+            if (window.recordSessionLoginOnce) {
+                window.recordSessionLoginOnce();
+            }
+            
+            loadProfileData();
+        }
+
+        function loadProfileData() {
+            const username = localStorage.getItem('username');
+            const storedProfile = localStorage.getItem(`profile_${username}`);
+            if (storedProfile) {
+                currentProfile = JSON.parse(storedProfile);
+            } else {
+                currentProfile = {
+                    name: username,
+                    username: username,
+                    email: `${username}@company.com`,
+                    phone: '+1 (555) 123-4567',
+                    department: 'Operations',
+                    role: 'Employee',
+                    employeeId: `EMP${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`,
+                    lastLogin: new Date().toISOString()
+                };
+                localStorage.setItem(`profile_${username}`, JSON.stringify(currentProfile));
+            }
+            displayProfile();
+        }
+
+        function displayProfile() {
+            document.getElementById('profileName').textContent = currentProfile.name;
+            document.getElementById('profileUsername').textContent = currentProfile.username;
+            document.getElementById('profileEmail').textContent = currentProfile.email;
+            document.getElementById('profilePhone').textContent = currentProfile.phone;
+            document.getElementById('profileDepartment').textContent = currentProfile.department;
+            document.getElementById('profileRole').textContent = currentProfile.role;
+            document.getElementById('profileEmployeeId').textContent = currentProfile.employeeId;
+            document.getElementById('profileLastLogin').textContent = new Date(currentProfile.lastLogin).toLocaleString();
+        }
+
+        function editProfile() {
+            document.getElementById('editName').value = currentProfile.name;
+            document.getElementById('editEmail').value = currentProfile.email;
+            document.getElementById('editPhone').value = currentProfile.phone;
+            document.getElementById('editDepartment').value = currentProfile.department;
+            document.getElementById('editProfileModal').style.display = 'block';
+        }
+
+        function closeEditModal() {
+            document.getElementById('editProfileModal').style.display = 'none';
+        }
+
+        function saveProfile(event) {
+            event.preventDefault();
+            const username = localStorage.getItem('username');
+            currentProfile.name = document.getElementById('editName').value;
+            currentProfile.email = document.getElementById('editEmail').value;
+            currentProfile.phone = document.getElementById('editPhone').value;
+            currentProfile.department = document.getElementById('editDepartment').value;
+            localStorage.setItem(`profile_${username}`, JSON.stringify(currentProfile));
+            displayProfile();
+            closeEditModal();
+            alert('Profile updated successfully!');
+            if (window.addAuditLog) {
+                window.addAuditLog(username, 'Update Profile', 'Updated personal profile information', 'low');
+            }
+        }
+
+        function changePassword(event) {
+            event.preventDefault();
+            const currentPassword = document.getElementById('currentPassword').value;
+            const newPassword = document.getElementById('newPassword').value;
+            const confirmPassword = document.getElementById('confirmPassword').value;
+            if (currentPassword !== 'password') {
+                alert('Current password is incorrect.');
+                return;
+            }
+            if (newPassword !== confirmPassword) {
+                alert('New passwords do not match.');
+                return;
+            }
+            const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
+            if (!passwordRegex.test(newPassword)) {
+                alert('Password does not meet requirements.');
+                return;
+            }
+            alert('Password changed successfully! (This is a demo - no actual password change occurs)');
+            document.getElementById('changePasswordForm').reset();
+            const username = localStorage.getItem('username');
+            if (window.addAuditLog) {
+                window.addAuditLog(username, 'Change Password', 'Password changed successfully', 'medium');
+            }
+        }
+
+        function enable2FA() {
+            alert('Two-factor authentication setup would appear here. This is a demo feature.');
+        }
+
+        function viewSessions() {
+            alert('Active sessions would be displayed here. This is a demo feature.');
+        }
+
+        function logout() {
+            localStorage.removeItem('authToken');
+            localStorage.removeItem('userRole');
+            localStorage.removeItem('username');
+            window.location.href = 'login.html';
+        }
+
+        window.onclick = function(event) {
+            const modal = document.getElementById('editProfileModal');
+            if (event.target === modal) {
+                closeEditModal();
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', checkAuth);
+    </script>
+</body>
+</html>
+
