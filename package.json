@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
-    "build": "tsc"
+    "build": "tsc",
+    "db:pg:switch": "bash scripts/switch_to_postgres.sh"
   },
   "repository": {
     "type": "git",
