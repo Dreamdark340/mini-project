@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login - Payroll Management</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <style>
+    .auth-wrap { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+    .auth-card { width: 100%; max-width: 420px; background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; box-shadow: 0 10px 30px rgba(2,6,23,0.08); padding: 22px; }
+    .auth-header { text-align: center; margin-bottom: 14px; }
+    .auth-header h1 { margin: 0; font-size: 1.35rem; }
+    .brand { display: inline-flex; align-items: center; gap: 10px; margin-bottom: 6px; font-weight: 800; }
+    .hint { color: #64748b; font-size: 0.95rem; }
+    .error { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; padding: 10px 12px; border-radius: 10px; margin-bottom: 12px; display: none; }
+    .divider { display: flex; align-items: center; gap: 10px; color: #94a3b8; font-size: 0.9rem; margin: 12px 0; }
+    .divider::before, .divider::after { content: ""; height: 1px; width: 100%; background: #e5e7eb; }
+  </style>
+  <script>
+    // Base32 + util + TOTP
+    const Base32 = (() => { const alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; const charToVal=Object.fromEntries([...alphabet].map((c,i)=>[c,i])); return { encode(bytes){let bits=0,value=0,out=''; for(let i=0;i<bytes.length;i++){ value=(value<<8)|bytes[i]; bits+=8; while(bits>=5){ out+=alphabet[(value>>>(bits-5))&31]; bits-=5; } } if(bits>0){ out+=alphabet[(value<<(5-bits))&31]; } return out; }, decode(str){ const clean=str.toUpperCase().replace(/=+$/,''); let bits=0,value=0; const out=[]; for(let i=0;i<clean.length;i++){ const ch=clean[i]; const val=charToVal[ch]; if(val===undefined) continue; value=(value<<5)|val; bits+=5; if(bits>=8){ out.push((value>>>(bits-8))&255); bits-=8; } } return new Uint8Array(out); } }; })();
+    function getRandomBytes(n){ const b=new Uint8Array(n); crypto.getRandomValues(b); return b; }
+    function generateId(prefix='id'){ const now=Date.now().toString(36); const rand=Base32.encode(getRandomBytes(10)).slice(0,12).toLowerCase(); return `${prefix}_${now}_${rand}`; }
+    async function generateTOTPAtTime(base32Secret, epochSeconds, step, digits){ const keyBytes=Base32.decode(base32Secret); const counter=Math.floor(epochSeconds/step); const buf=new ArrayBuffer(8); const view=new DataView(buf); view.setUint32(0,Math.floor(counter/0x100000000)); view.setUint32(4,counter>>>0); const key=await crypto.subtle.importKey('raw',keyBytes,{name:'HMAC',hash:'SHA-1'},false,['sign']); const hmac=new Uint8Array(await crypto.subtle.sign('HMAC',key,buf)); const off=hmac[hmac.length-1]&0x0f; const codeInt=((hmac[off]&0x7f)<<24)|(hmac[off+1]<<16)|(hmac[off+2]<<8)|hmac[off+3]; const mod=10**digits; return (codeInt%mod).toString().padStart(digits,'0'); }
+    async function verifyTOTPCode(base32Secret, userCode){ const digits=userCode.length; const now=Math.floor(Date.now()/1000); for(const off of [0,-1,1]){ const code=await generateTOTPAtTime(base32Secret, now+off*30, 30, digits); if(code===userCode) return true; } return false; }
+
+    // Keys
+    function securityKey(u){ return `security_${u}`; }
+    function sessionsKey(u){ return `sessions_${u}`; }
+    function getSecurity(u){ const raw=localStorage.getItem(securityKey(u)); return raw?JSON.parse(raw):{ twoFAEnabled:false, twoFASecret:null, recoveryCodes:[] }; }
+    function getSessions(u){ const raw=localStorage.getItem(sessionsKey(u)); return raw?JSON.parse(raw):[]; }
+    function setSessions(u,s){ localStorage.setItem(sessionsKey(u), JSON.stringify(s)); }
+
+    function showError(msg){ const el=document.getElementById('errorBox'); el.textContent=msg; el.style.display='block'; }
+    function clearError(){ const el=document.getElementById('errorBox'); el.style.display='none'; el.textContent=''; }
+
+    function onDomReady(){
+      document.getElementById('loginForm').addEventListener('submit', onLoginSubmit);
+      document.getElementById('twoFAForm').addEventListener('submit', onTwoFASubmit);
+      document.getElementById('useRecoveryBtn').addEventListener('click', ()=>{
+        document.getElementById('twoFACode').value='';
+        document.getElementById('recoveryCode').parentElement.style.display='block';
+        document.getElementById('twoFABadge').textContent='Using recovery code';
+      });
+      document.getElementById('backToCodeBtn').addEventListener('click', ()=>{
+        document.getElementById('recoveryCode').value='';
+        document.getElementById('recoveryCode').parentElement.style.display='none';
+        document.getElementById('twoFABadge').textContent='Enter 6-digit code';
+      });
+    }
+
+    let pendingUser = null;
+    let rememberMe = false;
+
+    async function onLoginSubmit(e){
+      e.preventDefault(); clearError();
+      const username=(document.getElementById('username').value||'').trim();
+      const password=document.getElementById('password').value||'';
+      rememberMe=document.getElementById('remember').checked;
+      if(!username || !password){ showError('Enter username and password.'); return; }
+      // Demo password check
+      if(password !== 'password'){ showError('Invalid username or password.'); return; }
+      const sec=getSecurity(username);
+      pendingUser=username;
+      if(sec.twoFAEnabled){
+        // Show 2FA step
+        document.getElementById('loginStep').style.display='none';
+        document.getElementById('twoFAStep').style.display='block';
+        document.getElementById('twoFAUser').textContent=username;
+        document.getElementById('recoveryCode').parentElement.style.display='none';
+        document.getElementById('twoFACode').focus();
+      } else {
+        finalizeLogin(username);
+      }
+    }
+
+    async function onTwoFASubmit(e){
+      e.preventDefault(); clearError();
+      const username=pendingUser; if(!username){ showError('Session expired. Try again.'); return; }
+      const sec=getSecurity(username);
+      const code=(document.getElementById('twoFACode').value||'').trim();
+      const rec=(document.getElementById('recoveryCode').value||'').trim();
+      if(!sec.twoFAEnabled){ finalizeLogin(username); return; }
+      try{
+        if(rec){
+          const idx=sec.recoveryCodes.indexOf(rec);
+          if(idx===-1){ showError('Invalid recovery code.'); return; }
+          // consume code
+          sec.recoveryCodes.splice(idx,1);
+          localStorage.setItem(securityKey(username), JSON.stringify(sec));
+          finalizeLogin(username);
+          return;
+        }
+        if(!/^\d{6}$/.test(code)){ showError('Enter a valid 6-digit code.'); return; }
+        const ok=await verifyTOTPCode(sec.twoFASecret, code);
+        if(!ok){ showError('Incorrect 2FA code.'); return; }
+        finalizeLogin(username);
+      }catch(err){ showError('Crypto not available in this browser.'); }
+    }
+
+    function finalizeLogin(username){
+      // Set auth artifacts
+      const token=generateId('token');
+      localStorage.setItem('authToken', token);
+      localStorage.setItem('userRole', 'employee');
+      localStorage.setItem('username', username);
+      if(rememberMe){ localStorage.setItem('rememberMe', '1'); } else { localStorage.removeItem('rememberMe'); }
+
+      // Create current session
+      const sessionId=generateId('sess');
+      localStorage.setItem('currentSessionId', sessionId);
+      const ua=navigator.userAgent;
+      const now=new Date().toISOString();
+      const sessions=getSessions(username);
+      sessions.forEach(s=>{ s.isCurrent=false; });
+      sessions.push({ id: sessionId, createdAt: now, lastActiveAt: now, userAgent: ua, device: ua.substring(0,40), ipAddress: 'Unknown', location: 'Unknown', isCurrent: true });
+      setSessions(username, sessions);
+
+      // Login history
+      const key=`loginHistory_${username}`;
+      const hist=JSON.parse(localStorage.getItem(key) || '[]');
+      hist.unshift({ timestamp: now, ipAddress: 'Unknown', device: ua, status: 'Success', location: 'Unknown' });
+      localStorage.setItem(key, JSON.stringify(hist.slice(0,50)));
+
+      // Redirect
+      window.location.href='employee-profile.html';
+    }
+
+    document.addEventListener('DOMContentLoaded', onDomReady);
+  </script>
+</head>
+<body>
+  <div class="auth-wrap">
+    <div class="auth-card">
+      <div class="auth-header">
+        <div class="brand"><i class="fas fa-chart-line"></i> Payroll Management</div>
+        <h1>Sign in to your account</h1>
+        <div class="hint">Use demo password: <strong>password</strong></div>
+      </div>
+      <div id="errorBox" class="error"></div>
+
+      <!-- Step 1: Credentials -->
+      <form id="loginForm" id="loginStep">
+        <div class="form-group">
+          <label for="username">Username</label>
+          <input type="text" id="username" placeholder="e.g. aaron" autocomplete="username" required>
+        </div>
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" placeholder="Your password" autocomplete="current-password" required>
+        </div>
+        <div class="form-group" style="display:flex; align-items:center; gap:10px;">
+          <input type="checkbox" id="remember" style="width:auto;">
+          <label for="remember" style="margin:0;">Remember this device</label>
+        </div>
+        <div class="modal-actions">
+          <button type="submit" class="primary-btn" style="width:100%; justify-content:center;">
+            <i class="fas fa-right-to-bracket"></i> Continue
+          </button>
+        </div>
+      </form>
+
+      <!-- Step 2: 2FA -->
+      <div id="twoFAStep" style="display:none;">
+        <div class="divider"><span>Two-Factor Verification</span></div>
+        <div class="hint">Account: <strong id="twoFAUser">user</strong></div>
+        <form id="twoFAForm">
+          <div class="form-group">
+            <label>Authenticator Code <span id="twoFABadge" class="status-badge success" style="margin-left:6px;">Enter 6-digit code</span></label>
+            <input type="text" id="twoFACode" placeholder="123456" inputmode="numeric" pattern="\d{6}" maxlength="6">
+          </div>
+          <div class="form-group" style="display:none;">
+            <label>Recovery Code</label>
+            <input type="text" id="recoveryCode" placeholder="XXXX-XXXX">
+          </div>
+          <div class="modal-actions" style="justify-content:space-between;">
+            <div>
+              <button type="button" id="useRecoveryBtn" class="secondary-btn small"><i class="fas fa-key"></i> Use recovery</button>
+              <button type="button" id="backToCodeBtn" class="secondary-btn small"><i class="fas fa-rotate-left"></i> Use code</button>
+            </div>
+            <button type="submit" class="primary-btn"><i class="fas fa-lock-open"></i> Verify & Sign in</button>
+          </div>
+        </form>
+      </div>
+
+    </div>
+  </div>
+</body>
+</html>
+
