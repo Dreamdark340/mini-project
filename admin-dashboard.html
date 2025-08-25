@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Dashboard - Payroll Management</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <script>
+    const API_BASE = 'http://localhost:4000';
+    function logout(){ localStorage.removeItem('authToken'); localStorage.removeItem('userRole'); localStorage.removeItem('username'); window.location.href='login.html'; }
+    function authHeaders(){ const t=localStorage.getItem('authToken'); return { 'Content-Type':'application/json', 'Authorization': `Bearer ${t}` }; }
+    async function checkAuth(){ const t=localStorage.getItem('authToken'); const r=localStorage.getItem('userRole'); const u=localStorage.getItem('username'); if(!t||!r||!u){ window.location.href='login.html'; return; } if(r!=='admin'){ alert('Admins only'); window.location.href='employee-dashboard.html'; return; } document.getElementById('currentUser').innerHTML=`<span>${u}</span><span class="role-badge">ADMIN</span>`; document.body.classList.add('employee-theme'); await loadCompanies(); }
+    async function loadCompanies(){ const tbody=document.getElementById('companiesBody'); tbody.innerHTML='<tr><td colspan="3" class="no-data">Loading...</td></tr>'; try{ const resp=await fetch(`${API_BASE}/api/admin/companies`, { headers: authHeaders() }); if(!resp.ok) throw new Error(); const d=await resp.json(); tbody.innerHTML=(d.companies||[]).map(c=>`<tr><td>${c.name}</td><td>${c.id}</td><td><button class=\"secondary-btn small\" onclick=\"renameCompany('${c.id}','${c.name.replace(/'/g,"&#39;")}')\"><i class=\"fas fa-pen\"></i> Rename</button></td></tr>`).join(''); }catch{ tbody.innerHTML='<tr><td colspan="3" class="no-data">Failed</td></tr>'; } }
+    async function addCompany(e){ e.preventDefault(); const name=e.target.name.value; try{ const resp=await fetch(`${API_BASE}/api/admin/companies`, { method:'POST', headers: authHeaders(), body: JSON.stringify({ name }) }); if(!resp.ok) throw new Error(); e.target.reset(); await loadCompanies(); alert('Company added'); }catch{ alert('Failed to add'); } }
+    async function renameCompany(id, current){ const name=prompt('New company name:', current); if(!name) return; try{ const resp=await fetch(`${API_BASE}/api/admin/companies/${id}`, { method:'PUT', headers: authHeaders(), body: JSON.stringify({ name }) }); if(!resp.ok) throw new Error(); await loadCompanies(); }catch{ alert('Failed to rename'); } }
+    document.addEventListener('DOMContentLoaded', checkAuth);
+  </script>
+</head>
+<body>
+  <header class="header">
+    <div class="header-content">
+      <h1><i class="fas fa-building"></i> Admin Dashboard</h1>
+      <div class="user-info">
+        <span id="currentUser">Loading...</span>
+        <button onclick="logout()" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</button>
+      </div>
+    </div>
+  </header>
+  <div class="container">
+    <nav class="sidebar">
+      <div class="sidebar-header"><i class="fas fa-user-tie"></i><span>Portal</span></div>
+      <ul class="nav-links">
+        <li class="active"><a href="admin-dashboard.html"><i class="fas fa-building"></i><span>Admin</span></a></li>
+        <li><a href="hr-dashboard.html"><i class="fas fa-users"></i><span>HR</span></a></li>
+        <li><a href="employee-profile.html"><i class="fas fa-user-cog"></i><span>Profile</span></a></li>
+      </ul>
+    </nav>
+    <main class="main-content">
+      <div class="page-header"><h2><i class="fas fa-building"></i> Companies</h2><p>Manage companies for multi-tenancy.</p></div>
+      <div class="content-section">
+        <div class="section-header"><h3><i class="fas fa-plus"></i> Add Company</h3></div>
+        <form onsubmit="addCompany(event)">
+          <div class="form-grid">
+            <div class="form-group"><label>Name</label><input name="name" required></div>
+          </div>
+          <div class="modal-actions"><button class="primary-btn" type="submit"><i class="fas fa-save"></i> Save</button></div>
+        </form>
+      </div>
+      <div class="content-section">
+        <div class="section-header"><h3><i class="fas fa-list"></i> Company List</h3></div>
+        <div class="table-container">
+          <table class="data-table">
+            <thead><tr><th>Name</th><th>ID</th><th>Actions</th></tr></thead>
+            <tbody id="companiesBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+  <footer><p>&copy; 2025 PayrollPro by Aaron | Admin Portal</p></footer>
+</body>
+</html>
+

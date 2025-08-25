@@ -49,13 +49,19 @@ function requireRole(...roles: string[]) {
 
 // Seed demo user if not exists
 app.get('/health', async (_req, res) => {
+  // seed companies
+  let acme = await prisma.company.findUnique({ where: { name: 'Acme Corp' } });
+  if (!acme) acme = await prisma.company.create({ data: { name: 'Acme Corp' } });
+  let adminCo = await prisma.company.findUnique({ where: { name: 'AdminCo' } });
+  if (!adminCo) adminCo = await prisma.company.create({ data: { name: 'AdminCo' } });
+
   // seed employee
   const emp = await prisma.user.findUnique({ where: { username: 'aaron' } });
   if (!emp) {
     const hash = await bcrypt.hash('password', 10);
     await prisma.user.create({ data: {
       username: 'aaron', email: 'aaron@company.com', passwordHash: hash,
-      fullName: 'Aaron Employee', department: 'Operations', employeeId: 'EMP0001'
+      fullName: 'Aaron Employee', department: 'Operations', employeeId: 'EMP0001', companyId: acme.id
     }});
   }
   // seed hr
@@ -64,7 +70,7 @@ app.get('/health', async (_req, res) => {
     const hash = await bcrypt.hash('password', 10);
     await prisma.user.create({ data: {
       username: 'hr1', email: 'hr1@company.com', passwordHash: hash,
-      fullName: 'Harper HR', department: 'HR', employeeId: 'EMP9001', role: 'hr'
+      fullName: 'Harper HR', department: 'HR', employeeId: 'EMP9001', role: 'hr', companyId: acme.id
     }});
   }
   // seed admin
@@ -73,7 +79,7 @@ app.get('/health', async (_req, res) => {
     const hash = await bcrypt.hash('admin123', 10);
     await prisma.user.create({ data: {
       username: 'admin', email: 'admin@company.com', passwordHash: hash,
-      fullName: 'Alex Admin', department: 'Admin', employeeId: 'EMP9999', role: 'admin'
+      fullName: 'Alex Admin', department: 'Admin', employeeId: 'EMP9999', role: 'admin', companyId: adminCo.id
     }});
   }
   res.json({ ok: true });
@@ -93,7 +99,7 @@ app.post('/api/auth/login', async (req, res) => {
   if (user.twoFAEnabled) {
     return res.json({ twoFARequired: true });
   } else {
-    const session = await prisma.session.create({ data: { userId: user.id, userAgent } });
+    const session = await prisma.session.create({ data: { userId: user.id, companyId: user.companyId, userAgent } });
     const token = signToken(user.id);
     await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
     return res.json({ token, sessionId: session.id, user: { username: user.username, role: user.role, fullName: user.fullName } });
@@ -119,7 +125,7 @@ app.post('/api/auth/2fa', async (req, res) => {
     verified = speakeasy.totp.verify({ secret: user.twoFASecret, encoding: 'base32', token: code, window: 1 });
   }
   if (!verified) return res.status(401).json({ error: 'Invalid 2FA verification' });
-  const session = await prisma.session.create({ data: { userId: user.id, userAgent } });
+  const session = await prisma.session.create({ data: { userId: user.id, companyId: user.companyId, userAgent } });
   const token = signToken(user.id);
   await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
   return res.json({ token, sessionId: session.id, user: { username: user.username, role: user.role, fullName: user.fullName } });
@@ -162,7 +168,8 @@ app.post('/api/2fa/recovery/regenerate', authMiddleware, async (req: any, res) =
 
 // Sessions
 app.get('/api/sessions', authMiddleware, async (req: any, res) => {
-  const sessions = await prisma.session.findMany({ where: { userId: req.userId }, orderBy: { lastActive: 'desc' } });
+  const user = await prisma.user.findUnique({ where: { id: req.userId } });
+  const sessions = await prisma.session.findMany({ where: { userId: req.userId, companyId: user?.companyId }, orderBy: { lastActive: 'desc' } });
   res.json({ sessions });
 });
 app.delete('/api/sessions/:id', authMiddleware, async (req: any, res) => {
@@ -197,15 +204,17 @@ app.get('/api/reports/:id/pdf', authMiddleware, async (_req, res) => {
 });
 
 // HR Endpoints (hr or admin)
-app.get('/api/hr/employees', authMiddleware, requireRole('hr', 'admin'), async (_req, res) => {
+app.get('/api/hr/employees', authMiddleware, requireRole('hr', 'admin'), async (req: any, res) => {
+  const me = await prisma.user.findUnique({ where: { id: req.userId } });
   const employees = await prisma.user.findMany({
+    where: { companyId: me?.companyId },
     select: { id: true, username: true, email: true, fullName: true, role: true, department: true, employeeId: true, lastLoginAt: true },
     orderBy: { username: 'asc' }
   });
   res.json({ employees });
 });
 
-app.post('/api/hr/employees', authMiddleware, requireRole('hr', 'admin'), async (req, res) => {
+app.post('/api/hr/employees', authMiddleware, requireRole('hr', 'admin'), async (req: any, res) => {
   const schema = z.object({ username: z.string(), email: z.string().email(), fullName: z.string(), department: z.string().optional(), role: z.enum(['employee', 'hr', 'admin']).default('employee'), password: z.string().min(6) });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'Invalid payload' });
@@ -213,8 +222,9 @@ app.post('/api/hr/employees', authMiddleware, requireRole('hr', 'admin'), async 
   const existing = await prisma.user.findFirst({ where: { OR: [{ username }, { email }] } });
   if (existing) return res.status(409).json({ error: 'User exists' });
   const hash = await bcrypt.hash(password, 10);
+  const me = await prisma.user.findUnique({ where: { id: req.userId } });
   const newEmp = await prisma.user.create({ data: {
-    username, email, fullName, department, role, passwordHash: hash, employeeId: generateEmployeeId()
+    username, email, fullName, department, role, passwordHash: hash, employeeId: generateEmployeeId(), companyId: me!.companyId
   }});
   res.status(201).json({ id: newEmp.id });
 });
@@ -229,7 +239,7 @@ app.put('/api/hr/employees/:id/role', authMiddleware, requireRole('hr', 'admin')
 });
 
 // Payroll APIs (HR/Admin)
-app.post('/api/hr/payroll', authMiddleware, requireRole('hr', 'admin'), async (req, res) => {
+app.post('/api/hr/payroll', authMiddleware, requireRole('hr', 'admin'), async (req: any, res) => {
   const schema = z.object({
     username: z.string(),
     periodStart: z.string(),
@@ -242,10 +252,12 @@ app.post('/api/hr/payroll', authMiddleware, requireRole('hr', 'admin'), async (r
   if (!parsed.success) return res.status(400).json({ error: 'Invalid payload' });
   const { username, periodStart, periodEnd, baseSalary, bonus, deductions } = parsed.data;
   const user = await prisma.user.findUnique({ where: { username } });
-  if (!user) return res.status(404).json({ error: 'User not found' });
+  const me = await prisma.user.findUnique({ where: { id: req.userId } });
+  if (!user || user.companyId !== me?.companyId) return res.status(404).json({ error: 'User not found' });
   const netPay = baseSalary + bonus - deductions;
   const entry = await prisma.payrollEntry.create({ data: {
     userId: user.id,
+    companyId: me!.companyId,
     periodStart: new Date(periodStart),
     periodEnd: new Date(periodEnd),
     baseSalary, bonus, deductions, netPay
@@ -253,9 +265,10 @@ app.post('/api/hr/payroll', authMiddleware, requireRole('hr', 'admin'), async (r
   res.status(201).json({ id: entry.id });
 });
 
-app.get('/api/hr/payroll', authMiddleware, requireRole('hr', 'admin'), async (req, res) => {
+app.get('/api/hr/payroll', authMiddleware, requireRole('hr', 'admin'), async (req: any, res) => {
   const { username } = req.query as { username?: string };
-  let where: any = {};
+  const me = await prisma.user.findUnique({ where: { id: req.userId } });
+  let where: any = { companyId: me?.companyId };
   if (username) {
     const u = await prisma.user.findUnique({ where: { username } });
     if (!u) return res.json({ entries: [] });
@@ -267,13 +280,35 @@ app.get('/api/hr/payroll', authMiddleware, requireRole('hr', 'admin'), async (re
 
 app.get('/api/payslips/:id/pdf', authMiddleware, async (req: any, res) => {
   const { id } = req.params;
-  const entry = await prisma.payrollEntry.findUnique({ where: { id }, include: { user: true } });
+  const me = await prisma.user.findUnique({ where: { id: req.userId } });
+  const entry = await prisma.payrollEntry.findFirst({ where: { id, companyId: me?.companyId }, include: { user: true } });
   if (!entry) return res.status(404).json({ error: 'Not found' });
   // Simple text PDF placeholder
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="payslip_${entry.user.username}_${entry.id}.pdf"`);
   const pdf = Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF');
   res.end(pdf);
+});
+
+// Admin: Companies
+app.get('/api/admin/companies', authMiddleware, requireRole('admin'), async (_req, res) => {
+  const companies = await prisma.company.findMany({ orderBy: { name: 'asc' } });
+  res.json({ companies });
+});
+app.post('/api/admin/companies', authMiddleware, requireRole('admin'), async (req, res) => {
+  const schema = z.object({ name: z.string().min(2) });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid payload' });
+  const c = await prisma.company.create({ data: { name: parsed.data.name } });
+  res.status(201).json({ id: c.id });
+});
+app.put('/api/admin/companies/:id', authMiddleware, requireRole('admin'), async (req, res) => {
+  const schema = z.object({ name: z.string().min(2) });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid payload' });
+  const { id } = req.params;
+  const c = await prisma.company.update({ where: { id }, data: { name: parsed.data.name } });
+  res.json({ ok: true, company: c });
 });
 
 function randomCode() {

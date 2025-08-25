@@ -12,6 +12,13 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model Company {
+  id        String  @id @default(cuid())
+  name      String  @unique
+  createdAt DateTime @default(now())
+  users     User[]
+}
+
 model User {
   id            String   @id @default(cuid())
   username      String   @unique
@@ -23,6 +30,8 @@ model User {
   department    String?
   employeeId    String   @unique
   lastLoginAt   DateTime?
+  company       Company  @relation(fields: [companyId], references: [id])
+  companyId     String
   // 2FA
   twoFAEnabled  Boolean  @default(false)
   twoFASecret   String?
@@ -38,6 +47,7 @@ model Session {
   id          String   @id @default(cuid())
   user        User     @relation(fields: [userId], references: [id])
   userId      String
+  companyId   String
   userAgent   String?
   ipAddress   String?
   createdAt   DateTime @default(now())
@@ -57,6 +67,7 @@ model PayrollEntry {
   id           String   @id @default(cuid())
   user         User     @relation(fields: [userId], references: [id])
   userId       String
+  companyId    String
   periodStart  DateTime
   periodEnd    DateTime
   baseSalary   Int      // cents
