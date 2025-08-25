@@ -11,10 +11,15 @@
     function logout(){ localStorage.removeItem('authToken'); localStorage.removeItem('userRole'); localStorage.removeItem('username'); window.location.href='login.html'; }
     async function checkAuth(){ const t=localStorage.getItem('authToken'); const r=localStorage.getItem('userRole'); const u=localStorage.getItem('username'); if(!t||!r||!u){ window.location.href='login.html'; return; } if(r!=='hr' && r!=='admin'){ alert('HR/Admin only'); window.location.href='employee-dashboard.html'; return; } document.getElementById('currentUser').innerHTML=`<span>${u}</span><span class="role-badge">${r.toUpperCase()}</span>`; document.body.classList.add('employee-theme'); await loadEmployees(); }
     function authHeaders(){ const t=localStorage.getItem('authToken'); return { 'Content-Type':'application/json', 'Authorization': `Bearer ${t}` }; }
-    async function loadEmployees(){ const tbody=document.getElementById('employeesBody'); tbody.innerHTML='<tr><td colspan="6" class="no-data">Loading...</td></tr>'; try{ const resp=await fetch(`${API_BASE}/api/hr/employees`, { headers: authHeaders() }); if(!resp.ok) throw new Error(); const data=await resp.json(); tbody.innerHTML = (data.employees||[]).map(e=>`<tr><td>${e.fullName}</td><td>${e.username}</td><td>${e.email}</td><td>${e.department||'-'}</td><td><span class="status-badge">${e.role}</span></td><td><button class="secondary-btn small" onclick="promote('${e.id}','hr')">Make HR</button> <button class="secondary-btn small" onclick="promote('${e.id}','employee')">Make Employee</button></td></tr>`).join(''); }catch{ tbody.innerHTML='<tr><td colspan="6" class="no-data">Failed to load</td></tr>'; } }
+    async function loadEmployees(){ const tbody=document.getElementById('employeesBody'); tbody.innerHTML='<tr><td colspan="6" class="no-data">Loading...</td></tr>'; try{ const resp=await fetch(`${API_BASE}/api/hr/employees`, { headers: authHeaders() }); if(!resp.ok) throw new Error(); const data=await resp.json(); tbody.innerHTML = (data.employees||[]).map(e=>`<tr><td>${e.fullName}</td><td>${e.username}</td><td>${e.email}</td><td>${e.department||'-'}</td><td><span class="status-badge">${e.role}</span></td><td><button class="secondary-btn small" onclick="openPayrollModal('${e.username}')"><i class="fas fa-money-bill"></i> Payroll</button> <button class="secondary-btn small" onclick="promote('${e.id}','hr')">Make HR</button> <button class="secondary-btn small" onclick="promote('${e.id}','employee')">Make Employee</button></td></tr>`).join(''); }catch{ tbody.innerHTML='<tr><td colspan="6" class="no-data">Failed to load</td></tr>'; } }
     async function promote(id, role){ try{ const resp=await fetch(`${API_BASE}/api/hr/employees/${id}/role`, { method:'PUT', headers: authHeaders(), body: JSON.stringify({ role }) }); if(!resp.ok) throw new Error(); await loadEmployees(); }catch{ alert('Failed to update role'); } }
     async function addEmployee(e){ e.preventDefault(); const f=e.target; const payload={ fullName:f.fullName.value, email:f.email.value, username:f.username.value, department:f.department.value, password:f.password.value, role:f.role.value }; try{ const resp=await fetch(`${API_BASE}/api/hr/employees`, { method:'POST', headers: authHeaders(), body: JSON.stringify(payload) }); if(!resp.ok) throw new Error(); f.reset(); await loadEmployees(); alert('Employee added'); }catch{ alert('Failed to add'); } }
-    document.addEventListener('DOMContentLoaded', checkAuth);
+    function openPayrollModal(username){ document.getElementById('payrollUser').textContent=username; document.getElementById('payrollUsername').value=username; document.getElementById('payrollModal').style.display='block'; }
+    function closePayrollModal(){ document.getElementById('payrollModal').style.display='none'; }
+    async function savePayroll(e){ e.preventDefault(); const f=e.target; const payload={ username:f.username.value, periodStart:f.periodStart.value, periodEnd:f.periodEnd.value, baseSalary:Math.round(parseFloat(f.baseSalary.value||'0')*100), bonus:Math.round(parseFloat(f.bonus.value||'0')*100), deductions:Math.round(parseFloat(f.deductions.value||'0')*100) }; try{ const resp=await fetch(`${API_BASE}/api/hr/payroll`, { method:'POST', headers: authHeaders(), body: JSON.stringify(payload) }); if(!resp.ok) throw new Error(); closePayrollModal(); alert('Payroll saved'); await loadRecentPayroll(); }catch{ alert('Failed to save payroll'); } }
+    async function loadRecentPayroll(){ const tbody=document.getElementById('payrollBody'); if(!tbody) return; tbody.innerHTML='<tr><td colspan="7" class="no-data">Loading...</td></tr>'; try{ const resp=await fetch(`${API_BASE}/api/hr/payroll`, { headers: authHeaders() }); if(!resp.ok) throw new Error(); const d=await resp.json(); tbody.innerHTML=(d.entries||[]).slice(0,10).map(p=>`<tr><td>${p.user.fullName}</td><td>${p.user.username}</td><td>${new Date(p.periodStart).toLocaleDateString()}</td><td>${new Date(p.periodEnd).toLocaleDateString()}</td><td>$${(p.netPay/100).toFixed(2)}</td><td>${new Date(p.createdAt).toLocaleString()}</td><td><button class="secondary-btn small" onclick="downloadPayslip('${p.id}')"><i class="fas fa-download"></i> Payslip</button></td></tr>`).join(''); }catch{ tbody.innerHTML='<tr><td colspan="7" class="no-data">Failed</td></tr>'; } }
+    async function downloadPayslip(id){ try{ const resp=await fetch(`${API_BASE}/api/payslips/${id}/pdf`, { headers: authHeaders() }); if(!resp.ok) throw new Error(); const blob=await resp.blob(); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`payslip_${id}.pdf`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); }catch{ alert('Failed to download'); } }
+    document.addEventListener('DOMContentLoaded', ()=>{ checkAuth().then(loadRecentPayroll); });
   </script>
 </head>
 <body>
@@ -62,9 +67,34 @@
           </table>
         </div>
       </div>
+      <div class="content-section">
+        <div class="section-header"><h3><i class="fas fa-money-check-dollar"></i> Recent Payroll</h3></div>
+        <div class="table-container">
+          <table class="data-table">
+            <thead><tr><th>Name</th><th>Username</th><th>Period Start</th><th>Period End</th><th>Net Pay</th><th>Created</th><th>Actions</th></tr></thead>
+            <tbody id="payrollBody"></tbody>
+          </table>
+        </div>
+      </div>
     </main>
   </div>
   <footer><p>&copy; 2025 PayrollPro by Aaron | HR Portal</p></footer>
+  <div id="payrollModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header"><h3><i class="fas fa-sack-dollar"></i> Add Payroll for <span id="payrollUser"></span></h3><span class="close" onclick="closePayrollModal()">&times;</span></div>
+      <form onsubmit="savePayroll(event)">
+        <input type="hidden" name="username" id="payrollUsername">
+        <div class="form-grid">
+          <div class="form-group"><label>Period Start</label><input type="date" name="periodStart" required></div>
+          <div class="form-group"><label>Period End</label><input type="date" name="periodEnd" required></div>
+          <div class="form-group"><label>Base Salary ($)</label><input type="number" step="0.01" min="0" name="baseSalary" required></div>
+          <div class="form-group"><label>Bonus ($)</label><input type="number" step="0.01" min="0" name="bonus"></div>
+          <div class="form-group"><label>Deductions ($)</label><input type="number" step="0.01" min="0" name="deductions"></div>
+        </div>
+        <div class="modal-actions"><button type="button" class="secondary-btn" onclick="closePayrollModal()">Cancel</button><button class="primary-btn" type="submit"><i class="fas fa-check"></i> Save</button></div>
+      </form>
+    </div>
+  </div>
 </body>
 </html>
 
