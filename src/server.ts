@@ -223,6 +223,54 @@ app.put('/api/hr/employees/:id/role', authMiddleware, requireRole('hr', 'admin')
   res.json({ ok: true, role: updated.role });
 });
 
+// Payroll APIs (HR/Admin)
+app.post('/api/hr/payroll', authMiddleware, requireRole('hr', 'admin'), async (req, res) => {
+  const schema = z.object({
+    username: z.string(),
+    periodStart: z.string(),
+    periodEnd: z.string(),
+    baseSalary: z.number().int().nonnegative(),
+    bonus: z.number().int().nonnegative().default(0),
+    deductions: z.number().int().nonnegative().default(0)
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid payload' });
+  const { username, periodStart, periodEnd, baseSalary, bonus, deductions } = parsed.data;
+  const user = await prisma.user.findUnique({ where: { username } });
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  const netPay = baseSalary + bonus - deductions;
+  const entry = await prisma.payrollEntry.create({ data: {
+    userId: user.id,
+    periodStart: new Date(periodStart),
+    periodEnd: new Date(periodEnd),
+    baseSalary, bonus, deductions, netPay
+  }});
+  res.status(201).json({ id: entry.id });
+});
+
+app.get('/api/hr/payroll', authMiddleware, requireRole('hr', 'admin'), async (req, res) => {
+  const { username } = req.query as { username?: string };
+  let where: any = {};
+  if (username) {
+    const u = await prisma.user.findUnique({ where: { username } });
+    if (!u) return res.json({ entries: [] });
+    where.userId = u.id;
+  }
+  const entries = await prisma.payrollEntry.findMany({ where, orderBy: { createdAt: 'desc' }, include: { user: { select: { username: true, fullName: true, employeeId: true } } } });
+  res.json({ entries });
+});
+
+app.get('/api/payslips/:id/pdf', authMiddleware, async (req: any, res) => {
+  const { id } = req.params;
+  const entry = await prisma.payrollEntry.findUnique({ where: { id }, include: { user: true } });
+  if (!entry) return res.status(404).json({ error: 'Not found' });
+  // Simple text PDF placeholder
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="payslip_${entry.user.username}_${entry.id}.pdf"`);
+  const pdf = Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF');
+  res.end(pdf);
+});
+
 function randomCode() {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
   const rand = Array.from({ length: 4 }, () => alphabet[Math.floor(Math.random()*alphabet.length)]).join('');

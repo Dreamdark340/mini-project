@@ -29,6 +29,7 @@ model User {
   recoveryCodes RecoveryCode[]
   // relations
   sessions      Session[]
+  payrolls      PayrollEntry[]
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 }
@@ -50,4 +51,17 @@ model RecoveryCode {
   code      String   @unique
   usedAt    DateTime?
   createdAt DateTime @default(now())
+}
+
+model PayrollEntry {
+  id           String   @id @default(cuid())
+  user         User     @relation(fields: [userId], references: [id])
+  userId       String
+  periodStart  DateTime
+  periodEnd    DateTime
+  baseSalary   Int      // cents
+  bonus        Int      // cents
+  deductions   Int      // cents
+  netPay       Int      // cents
+  createdAt    DateTime @default(now())
 }
