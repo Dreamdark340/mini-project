@@ -19,6 +19,19 @@
   --radius-sm: 8px;
 }
 
+/* Dark theme */
+.dark {
+  --bg: #0b1220;
+  --card: #0e1628;
+  --text: #e5e7eb;
+  --muted: #94a3b8;
+  --border: #1f2a44;
+  --primary: #60a5fa;
+  --primary-600: #3b82f6;
+  --primary-700: #2563eb;
+  --success-bg: #06321a;
+}
+
 /* ===== Base ===== */
 * { box-sizing: border-box; }
 html, body { height: 100%; }
@@ -39,6 +52,8 @@ img { display: block; max-width: 100%; }
 .header-content { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 14px 22px; }
 .header h1 { display: flex; align-items: center; gap: 10px; font-size: 1.25rem; margin: 0; }
 .user-info { display: flex; align-items: center; gap: 12px; }
+.icon-btn { background: transparent; border: 1px solid var(--border); color: var(--text); padding: 8px 10px; border-radius: 8px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.icon-btn:hover { background: rgba(148,163,184,0.12); }
 .logout-btn { background: transparent; border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: 8px; cursor: pointer; }
 .logout-btn:hover { background: #f1f5f9; }
 .role-badge { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 999px; background: #e0e7ff; color: #3730a3; font-size: 0.75rem; font-weight: 600; }
@@ -79,6 +94,13 @@ img { display: block; max-width: 100%; }
 .danger { background: var(--danger); color: #fff; }
 .danger:hover { filter: brightness(0.95); }
 .small { font-size: 0.85rem; }
+
+/* Toasts */
+.toast-container { position: fixed; right: 16px; bottom: 16px; display: grid; gap: 10px; z-index: 2000; }
+.toast { background: var(--card); color: var(--text); border: 1px solid var(--border); box-shadow: var(--shadow); padding: 10px 14px; border-radius: 10px; display: flex; align-items: center; gap: 8px; min-width: 240px; }
+.toast.success { border-color: #16a34a33; }
+.toast.error { border-color: #ef444433; }
+.toast .close { margin-left: auto; cursor: pointer; color: var(--muted); }
 
 /* Forms */
 input[type="text"], input[type="email"], input[type="tel"], input[type="password"], select { width: 100%; background: #fff; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; color: var(--text); outline: none; transition: border 0.15s ease, box-shadow 0.15s ease; }
@@ -132,7 +154,9 @@ footer { text-align: center; color: var(--muted); padding: 18px; }
 
 @media (max-width: 900px) {
   .container { grid-template-columns: 1fr; }
-  .sidebar { position: relative; border-bottom: 1px solid var(--border); }
+  .sidebar { position: fixed; left: 0; top: 60px; bottom: 0; width: 260px; transform: translateX(-100%); transition: transform 0.2s ease; border-right: 1px solid var(--border); border-bottom: none; }
+  body.sidebar-open .sidebar { transform: translateX(0); background: #0f172a; }
+  .main-content { padding: 16px; }
   .profile-grid, .form-grid { grid-template-columns: 1fr; }
 }
 
