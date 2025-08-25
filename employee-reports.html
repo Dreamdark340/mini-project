@@ -9,7 +9,12 @@
   <script>
     function logout(){ localStorage.removeItem('authToken'); localStorage.removeItem('userRole'); localStorage.removeItem('username'); window.location.href='login.html'; }
     function checkAuth(){ const t=localStorage.getItem('authToken'); const r=localStorage.getItem('userRole'); const u=localStorage.getItem('username'); if(!t||!r||!u){ window.location.href='login.html'; return; } if(r!=='employee'){ window.location.href='login.html'; return; } document.getElementById('currentUser').innerHTML=`<span>${u}</span><span class="role-badge">Employee</span>`; document.body.classList.add('employee-theme'); }
+    function initTheme(){ const t=localStorage.getItem('theme')||'light'; if(t==='dark'){ document.documentElement.classList.add('dark'); } }
+    function toggleTheme(){ const r=document.documentElement; if(r.classList.contains('dark')){ r.classList.remove('dark'); localStorage.setItem('theme','light'); showToast('Light mode','success'); } else { r.classList.add('dark'); localStorage.setItem('theme','dark'); showToast('Dark mode','success'); } }
+    function toggleSidebar(){ document.body.classList.toggle('sidebar-open'); }
+    function showToast(message, type){ const c=document.getElementById('toastContainer'); if(!c) return; const el=document.createElement('div'); el.className=`toast ${type||''}`; el.innerHTML=`<i class=\"fas fa-info-circle\"></i><span>${message}</span><span class=\"close\" onclick=\"this.parentElement.remove()\">&times;</span>`; c.appendChild(el); setTimeout(()=>{ el.remove(); }, 3000); }
     document.addEventListener('DOMContentLoaded', checkAuth);
+    document.addEventListener('DOMContentLoaded', ()=>{ initTheme(); bindReportDownloads(); });
   </script>
 </head>
 <body>
@@ -17,6 +22,8 @@
     <div class="header-content">
       <h1><i class="fas fa-chart-line"></i> Payroll Management</h1>
       <div class="user-info">
+        <button class="icon-btn" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button>
+        <button class="icon-btn" onclick="toggleTheme()"><i class="fas fa-moon"></i></button>
         <span id="currentUser">Loading...</span>
         <button onclick="logout()" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</button>
       </div>
@@ -49,6 +56,7 @@
     </main>
   </div>
   <footer><p>&copy; 2025 PayrollPro by Aaron | Employee Portal</p></footer>
+  <div class="toast-container" id="toastContainer"></div>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script>
     const API_BASE = 'http://localhost:4000';

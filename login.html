@@ -14,8 +14,12 @@
     function getSecurity(u){ return { twoFAEnabled: true }; }
     function showError(msg){ const el=document.getElementById('errorBox'); el.textContent=msg; el.style.display='block'; }
     function clearError(){ const el=document.getElementById('errorBox'); el.style.display='none'; el.textContent=''; }
+    function initTheme(){ const t=localStorage.getItem('theme')||'light'; if(t==='dark'){ document.documentElement.classList.add('dark'); } }
+    function toggleTheme(){ const r=document.documentElement; if(r.classList.contains('dark')){ r.classList.remove('dark'); localStorage.setItem('theme','light'); } else { r.classList.add('dark'); localStorage.setItem('theme','dark'); } }
+    function showToast(message, type){ const c=document.getElementById('toastContainer'); if(!c) return; const el=document.createElement('div'); el.className=`toast ${type||''}`; el.innerHTML=`<i class=\"fas fa-info-circle\"></i><span>${message}</span><span class=\"close\" onclick=\"this.parentElement.remove()\">&times;</span>`; c.appendChild(el); setTimeout(()=>{ el.remove(); }, 3000); }
 
     function onDomReady(){
+      initTheme();
       document.getElementById('loginForm').addEventListener('submit', onLoginSubmit);
       document.getElementById('twoFAForm').addEventListener('submit', onTwoFASubmit);
       document.getElementById('useRecoveryBtn').addEventListener('click', ()=>{
@@ -94,6 +98,7 @@
     <div class="auth-card">
       <div class="auth-header">
         <div class="brand"><i class="fas fa-chart-line"></i> Payroll Management</div>
+        <div style="margin:8px 0;"><button class="icon-btn" onclick="toggleTheme()"><i class="fas fa-moon"></i> Theme</button></div>
         <h1>Sign in to your account</h1>
         <div class="hint">Use demo password: <strong>password</strong></div>
       </div>
@@ -145,6 +150,7 @@
 
     </div>
   </div>
+  <div class="toast-container" id="toastContainer"></div>
 </body>
 </html>
 

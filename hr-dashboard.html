@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HR Dashboard - Payroll Management</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <script>
+    const API_BASE = 'http://localhost:4000';
+    function logout(){ localStorage.removeItem('authToken'); localStorage.removeItem('userRole'); localStorage.removeItem('username'); window.location.href='login.html'; }
+    async function checkAuth(){ const t=localStorage.getItem('authToken'); const r=localStorage.getItem('userRole'); const u=localStorage.getItem('username'); if(!t||!r||!u){ window.location.href='login.html'; return; } if(r!=='hr' && r!=='admin'){ alert('HR/Admin only'); window.location.href='employee-dashboard.html'; return; } document.getElementById('currentUser').innerHTML=`<span>${u}</span><span class="role-badge">${r.toUpperCase()}</span>`; document.body.classList.add('employee-theme'); await loadEmployees(); await loadRecentPayroll(); initActiveCompanyBanner(); }
+    function authHeaders(){ const t=localStorage.getItem('authToken'); return { 'Content-Type':'application/json', 'Authorization': `Bearer ${t}` }; }
+    async function loadEmployees(){ const tbody=document.getElementById('employeesBody'); tbody.innerHTML='<tr><td colspan="6" class="no-data">Loading...</td></tr>'; try{ const activeCompanyId=localStorage.getItem('activeCompanyId'); const q=activeCompanyId?`?companyId=${encodeURIComponent(activeCompanyId)}`:''; const resp=await fetch(`${API_BASE}/api/hr/employees${q}`, { headers: authHeaders() }); if(!resp.ok) throw new Error(); const data=await resp.json(); tbody.innerHTML = (data.employees||[]).map(e=>`<tr><td>${e.fullName}</td><td>${e.username}</td><td>${e.email}</td><td>${e.department||'-'}</td><td><span class=\"status-badge\">${e.role}</span></td><td><button class=\"secondary-btn small\" onclick=\"openPayrollModal('${e.username}')\"><i class=\"fas fa-money-bill\"></i> Payroll</button> <button class=\"secondary-btn small\" onclick=\"promote('${e.id}','hr')\">Make HR</button> <button class=\"secondary-btn small\" onclick=\"promote('${e.id}','employee')\">Make Employee</button></td></tr>`).join(''); }catch{ tbody.innerHTML='<tr><td colspan="6" class="no-data">Failed to load</td></tr>'; } }
+    async function promote(id, role){ try{ const resp=await fetch(`${API_BASE}/api/hr/employees/${id}/role`, { method:'PUT', headers: authHeaders(), body: JSON.stringify({ role }) }); if(!resp.ok) throw new Error(); await loadEmployees(); showToast('Role updated','success'); }catch{ showToast('Failed to update role','error'); } }
+    async function addEmployee(e){ e.preventDefault(); const f=e.target; const payload={ fullName:f.fullName.value, email:f.email.value, username:f.username.value, department:f.department.value, password:f.password.value, role:f.role.value }; const activeCompanyId=localStorage.getItem('activeCompanyId'); if(activeCompanyId) (payload as any).companyId=activeCompanyId; try{ const resp=await fetch(`${API_BASE}/api/hr/employees`, { method:'POST', headers: authHeaders(), body: JSON.stringify(payload) }); if(!resp.ok) throw new Error(); f.reset(); await loadEmployees(); showToast('Employee added','success'); }catch{ showToast('Failed to add','error'); } }
+    function openPayrollModal(username){ document.getElementById('payrollUser').textContent=username; (document.getElementById('payrollUsername') as any).value=username; document.getElementById('payrollModal').style.display='block'; previewTDS(); }
+    function closePayrollModal(){ document.getElementById('payrollModal').style.display='none'; }
+    async function savePayroll(e){ e.preventDefault(); const f=e.target; const payload={ username:f.username.value, periodStart:f.periodStart.value, periodEnd:f.periodEnd.value, baseSalary:Math.round(parseFloat(f.baseSalary.value||'0')*100), bonus:Math.round(parseFloat(f.bonus.value||'0')*100), deductions:Math.round(parseFloat(f.deductions.value||'0')*100) }; try{ const resp=await fetch(`${API_BASE}/api/hr/payroll`, { method:'POST', headers: authHeaders(), body: JSON.stringify(payload) }); if(!resp.ok) throw new Error(); closePayrollModal(); showToast('Payroll saved','success'); await loadRecentPayroll(); }catch{ showToast('Failed to save payroll','error'); } }
+    async function loadRecentPayroll(){ const tbody=document.getElementById('payrollBody'); if(!tbody) return; tbody.innerHTML='<tr><td colspan="7" class="no-data">Loading...</td></tr>'; try{ const resp=await fetch(`${API_BASE}/api/hr/payroll`, { headers: authHeaders() }); if(!resp.ok) throw new Error(); const d=await resp.json(); tbody.innerHTML=(d.entries||[]).slice(0,10).map(p=>`<tr><td>${p.user.fullName}</td><td>${p.user.username}</td><td>${new Date(p.periodStart).toLocaleDateString()}</td><td>${new Date(p.periodEnd).toLocaleDateString()}</td><td>$${(p.netPay/100).toFixed(2)}</td><td>${new Date(p.createdAt).toLocaleString()}</td><td><button class=\"secondary-btn small\" onclick=\"downloadPayslip('${p.id}')\"><i class=\"fas fa-download\"></i> Payslip</button></td></tr>`).join(''); }catch{ tbody.innerHTML='<tr><td colspan="7" class="no-data">Failed</td></tr>'; } }
+    async function downloadPayslip(id){ try{ const resp=await fetch(`${API_BASE}/api/payslips/${id}/pdf`, { headers: authHeaders() }); if(!resp.ok) throw new Error(); const blob=await resp.blob(); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`payslip_${id}.pdf`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); }catch{ showToast('Failed to download','error'); } }
+    let tdsTimer=null;
+    async function previewTDS(){
+      clearTimeout(tdsTimer);
+      tdsTimer=setTimeout(async ()=>{
+        const u=(document.getElementById('payrollUsername') as any).value;
+        const form=(document.querySelector('#payrollModal form') as HTMLFormElement);
+        if(!form) return;
+        const base=parseFloat((form.baseSalary?.value||'0'));
+        const bonus=parseFloat((form.bonus?.value||'0'));
+        const ded=parseFloat((form.deductions?.value||'0'));
+        if(!u) return;
+        try{
+          const payload={ username:u, baseSalary:Math.round(base*100), bonus:Math.round(bonus*100), deductions:Math.round(ded*100) };
+          const resp=await fetch(`${API_BASE}/api/hr/tax/preview`, { method:'POST', headers: authHeaders(), body: JSON.stringify(payload) });
+          if(!resp.ok) throw new Error();
+          const d=await resp.json();
+          document.getElementById('tdsPreview').textContent=`Projected Monthly TDS: $${(d.monthlyTDS/100).toFixed(2)} (${(d.regime||'OLD').toUpperCase()} regime)`;
+        }catch{ document.getElementById('tdsPreview').textContent='Projected Monthly TDS: unavailable'; }
+      }, 250);
+    }
+    function initActiveCompanyBanner(){ const n=localStorage.getItem('activeCompanyName')||''; const el=document.getElementById('activeCompanyBanner'); if(el){ el.textContent = n ? `Active company: ${n}` : ''; }}
+    function initTheme(){ const t=localStorage.getItem('theme')||'light'; if(t==='dark'){ document.documentElement.classList.add('dark'); } }
+    function toggleTheme(){ const r=document.documentElement; if(r.classList.contains('dark')){ r.classList.remove('dark'); localStorage.setItem('theme','light'); showToast('Light mode','success'); } else { r.classList.add('dark'); localStorage.setItem('theme','dark'); showToast('Dark mode','success'); } }
+    function toggleSidebar(){ document.body.classList.toggle('sidebar-open'); }
+    function showToast(message, type){ const c=document.getElementById('toastContainer'); if(!c) return; const el=document.createElement('div'); el.className=`toast ${type||''}`; el.innerHTML=`<i class=\"fas fa-info-circle\"></i><span>${message}</span><span class=\"close\" onclick=\"this.parentElement.remove()\">&times;</span>`; c.appendChild(el); setTimeout(()=>{ el.remove(); }, 3500); }
+    document.addEventListener('DOMContentLoaded', ()=>{ initTheme(); checkAuth(); });
+  </script>
+</head>
+<body>
+  <header class="header">
+    <div class="header-content">
+      <h1><i class="fas fa-users-cog"></i> HR Dashboard</h1>
+      <div class="user-info">
+        <button class="icon-btn" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button>
+        <button class="icon-btn" onclick="toggleTheme()"><i class="fas fa-moon"></i></button>
+        <span id="currentUser">Loading...</span>
+        <button onclick="logout()" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</button>
+      </div>
+    </div>
+  </header>
+  <div class="container">
+    <nav class="sidebar">
+      <div class="sidebar-header"><i class="fas fa-user-tie"></i><span>Portal</span></div>
+      <ul class="nav-links">
+        <li><a href="employee-dashboard.html"><i class="fas fa-gauge"></i><span>Employee Dashboard</span></a></li>
+        <li class="active"><a href="hr-dashboard.html"><i class="fas fa-users"></i><span>HR Dashboard</span></a></li>
+        <li><a href="employee-profile.html"><i class="fas fa-user-cog"></i><span>Profile</span></a></li>
+      </ul>
+    </nav>
+    <main class="main-content">
+      <div class="page-header"><h2><i class="fas fa-users"></i> Employees</h2><p>Manage employee accounts and roles. <span id="activeCompanyBanner"></span></p></div>
+      <div class="content-section">
+        <div class="section-header"><h3><i class="fas fa-user-plus"></i> Add Employee</h3></div>
+        <form onsubmit="addEmployee(event)">
+          <div class="form-grid">
+            <div class="form-group"><label>Full Name</label><input name="fullName" required></div>
+            <div class="form-group"><label>Email</label><input type="email" name="email" required></div>
+            <div class="form-group"><label>Username</label><input name="username" required></div>
+            <div class="form-group"><label>Department</label><input name="department"></div>
+            <div class="form-group"><label>Password</label><input type="password" name="password" minlength="6" required></div>
+            <div class="form-group"><label>Role</label><select name="role"><option value="employee">Employee</option><option value="hr">HR</option><option value="admin">Admin</option></select></div>
+          </div>
+          <div class="modal-actions"><button class="primary-btn" type="submit"><i class="fas fa-save"></i> Save</button></div>
+        </form>
+      </div>
+
+      <div class="content-section">
+        <div class="section-header"><h3><i class="fas fa-list"></i> Employee List</h3></div>
+        <div class="table-container">
+          <table class="data-table">
+            <thead><tr><th>Name</th><th>Username</th><th>Email</th><th>Department</th><th>Role</th><th>Actions</th></tr></thead>
+            <tbody id="employeesBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="content-section">
+        <div class="section-header"><h3><i class="fas fa-money-check-dollar"></i> Recent Payroll</h3></div>
+        <div class="table-container">
+          <table class="data-table">
+            <thead><tr><th>Name</th><th>Username</th><th>Period Start</th><th>Period End</th><th>Net Pay</th><th>Created</th><th>Actions</th></tr></thead>
+            <tbody id="payrollBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+  <footer><p>&copy; 2025 PayrollPro by Aaron | HR Portal</p></footer>
+  <div class="toast-container" id="toastContainer"></div>
+  <div id="payrollModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header"><h3><i class="fas fa-sack-dollar"></i> Add Payroll for <span id="payrollUser"></span></h3><span class="close" onclick="closePayrollModal()">&times;</span></div>
+      <form onsubmit="savePayroll(event)">
+        <input type="hidden" name="username" id="payrollUsername">
+        <div class="form-grid">
+          <div class="form-group"><label>Period Start</label><input type="date" name="periodStart" required></div>
+          <div class="form-group"><label>Period End</label><input type="date" name="periodEnd" required></div>
+          <div class="form-group"><label>Base Salary ($)</label><input type="number" step="0.01" min="0" name="baseSalary" required oninput="previewTDS()"></div>
+          <div class="form-group"><label>Bonus ($)</label><input type="number" step="0.01" min="0" name="bonus" oninput="previewTDS()"></div>
+          <div class="form-group"><label>Deductions ($)</label><input type="number" step="0.01" min="0" name="deductions" oninput="previewTDS()"></div>
+        </div>
+        <div class="muted" id="tdsPreview" style="margin:8px 0;">Projected Monthly TDS: $0.00</div>
+        <div class="modal-actions"><button type="button" class="secondary-btn" onclick="closePayrollModal()">Cancel</button><button class="primary-btn" type="submit"><i class="fas fa-check"></i> Save</button></div>
+      </form>
+    </div>
+  </div>
+</body>
+</html>

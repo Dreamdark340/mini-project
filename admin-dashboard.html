@@ -16,7 +16,11 @@
     function updateActiveBanner(){ const n=localStorage.getItem('activeCompanyName')||'None'; document.getElementById('activeCompany').textContent=n; }
     async function addCompany(e){ e.preventDefault(); const name=e.target.name.value; try{ const resp=await fetch(`${API_BASE}/api/admin/companies`, { method:'POST', headers: authHeaders(), body: JSON.stringify({ name }) }); if(!resp.ok) throw new Error(); e.target.reset(); await loadCompanies(); alert('Company added'); }catch{ alert('Failed to add'); } }
     async function renameCompany(id, current){ const name=prompt('New company name:', current); if(!name) return; try{ const resp=await fetch(`${API_BASE}/api/admin/companies/${id}`, { method:'PUT', headers: authHeaders(), body: JSON.stringify({ name }) }); if(!resp.ok) throw new Error(); await loadCompanies(); }catch{ alert('Failed to rename'); } }
-    document.addEventListener('DOMContentLoaded', checkAuth);
+    function initTheme(){ const t=localStorage.getItem('theme')||'light'; if(t==='dark'){ document.documentElement.classList.add('dark'); } }
+    function toggleTheme(){ const r=document.documentElement; if(r.classList.contains('dark')){ r.classList.remove('dark'); localStorage.setItem('theme','light'); } else { r.classList.add('dark'); localStorage.setItem('theme','dark'); } }
+    function toggleSidebar(){ document.body.classList.toggle('sidebar-open'); }
+    function showToast(message, type){ const c=document.getElementById('toastContainer'); if(!c) return; const el=document.createElement('div'); el.className=`toast ${type||''}`; el.innerHTML=`<i class=\"fas fa-info-circle\"></i><span>${message}</span><span class=\"close\" onclick=\"this.parentElement.remove()\">&times;</span>`; c.appendChild(el); setTimeout(()=>{ el.remove(); }, 3000); }
+    document.addEventListener('DOMContentLoaded', ()=>{ initTheme(); checkAuth(); });
   </script>
 </head>
 <body>
@@ -24,6 +28,8 @@
     <div class="header-content">
       <h1><i class="fas fa-building"></i> Admin Dashboard</h1>
       <div class="user-info">
+        <button class="icon-btn" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button>
+        <button class="icon-btn" onclick="toggleTheme()"><i class="fas fa-moon"></i></button>
         <span id="currentUser">Loading...</span>
         <button onclick="logout()" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</button>
       </div>
@@ -61,6 +67,7 @@
     </main>
   </div>
   <footer><p>&copy; 2025 PayrollPro by Aaron | Admin Portal</p></footer>
+  <div class="toast-container" id="toastContainer"></div>
 </body>
 </html>
 

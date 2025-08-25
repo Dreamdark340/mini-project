@@ -9,7 +9,11 @@
   <script>
     function logout(){ localStorage.removeItem('authToken'); localStorage.removeItem('userRole'); localStorage.removeItem('username'); window.location.href='login.html'; }
     function checkAuth(){ const t=localStorage.getItem('authToken'); const r=localStorage.getItem('userRole'); const u=localStorage.getItem('username'); if(!t||!r||!u){ window.location.href='login.html'; return; } if(r!=='employee'){ window.location.href='login.html'; return; } document.getElementById('currentUser').innerHTML=`<span>${u}</span><span class="role-badge">Employee</span>`; document.body.classList.add('employee-theme'); }
-    document.addEventListener('DOMContentLoaded', checkAuth);
+    document.addEventListener('DOMContentLoaded', ()=>{ initTheme(); checkAuth(); });
+    function initTheme(){ const t=localStorage.getItem('theme')||'light'; if(t==='dark'){ document.documentElement.classList.add('dark'); } }
+    function toggleTheme(){ const r=document.documentElement; if(r.classList.contains('dark')){ r.classList.remove('dark'); localStorage.setItem('theme','light'); showToast('Light mode','success'); } else { r.classList.add('dark'); localStorage.setItem('theme','dark'); showToast('Dark mode','success'); } }
+    function toggleSidebar(){ document.body.classList.toggle('sidebar-open'); }
+    function showToast(message, type){ const c=document.getElementById('toastContainer'); if(!c) return; const el=document.createElement('div'); el.className=`toast ${type||''}`; el.innerHTML=`<i class=\"fas fa-info-circle\"></i><span>${message}</span><span class=\"close\" onclick=\"this.parentElement.remove()\">&times;</span>`; c.appendChild(el); setTimeout(()=>{ el.remove(); }, 3000); }
   </script>
   <style> .cards{ display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap:14px; } @media(max-width:900px){ .cards{ grid-template-columns: 1fr; } } .stat{ background: var(--card); border:1px solid var(--border); border-radius: var(--radius); padding:16px; box-shadow: var(--shadow); } .stat h4{ margin:0 0 6px; } .stat .num{ font-size: 1.6rem; font-weight: 800; } </style>
 </head>
@@ -18,6 +22,8 @@
     <div class="header-content">
       <h1><i class="fas fa-chart-line"></i> Payroll Management</h1>
       <div class="user-info">
+        <button class="icon-btn" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button>
+        <button class="icon-btn" onclick="toggleTheme()"><i class="fas fa-moon"></i></button>
         <span id="currentUser">Loading...</span>
         <button onclick="logout()" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</button>
       </div>
@@ -51,6 +57,7 @@
     </main>
   </div>
   <footer><p>&copy; 2025 PayrollPro by Aaron | Employee Portal</p></footer>
+  <div class="toast-container" id="toastContainer"></div>
 </body>
 </html>
 
