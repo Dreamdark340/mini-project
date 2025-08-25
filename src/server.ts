@@ -473,8 +473,9 @@ app.post('/api/trader/import/csv', authMiddleware, requireRole('trader', 'admin'
     if (mapping.symbolKind === 'market') rawSymbol = extractBaseFromMarket(rawSymbol);
     if (mapping.symbolKind === 'asset') rawSymbol = normalizeAsset(rawSymbol);
     const symbol = rawSymbol.toUpperCase();
-    const type = normalizeType(String(r[mapping.type] ?? ''));
-    const amount = parseFloat(String(r[mapping.amount] ?? ''));
+    const rawType = String(r[mapping.type] ?? '');
+    const type = normalizeType(rawType);
+    let amount = parseFloat(String(r[mapping.amount] ?? ''));
     const price = mapping.price ? parseFloat(String(r[mapping.price] ?? '')) : undefined;
     const timeRaw = String(r[mapping.timestamp] ?? '');
     const timestamp = new Date(timeRaw);
@@ -487,6 +488,10 @@ app.post('/api/trader/import/csv', authMiddleware, requireRole('trader', 'admin'
     if (errors.length > 0) {
       rowErrors.push({ row: rowNum, message: errors.join(', ') });
       continue;
+    }
+    if (type === 'trade') {
+      const isSell = /sell|withdraw|redeem/i.test(rawType);
+      amount = isSell ? -Math.abs(amount) : Math.abs(amount);
     }
     preview.push({ row: rowNum, symbol, amount, price, type, timestamp: timestamp.toISOString() });
     toPersist.push({ symbol, amount, priceUsdCents: price !== undefined ? Math.round((price as number) * 100) : undefined, type, timestamp, sourceEnc: encryptString(JSON.stringify({ source: 'CSV' })) });
@@ -692,15 +697,75 @@ app.get('/api/trader/transactions', authMiddleware, requireRole('trader', 'admin
 app.get('/api/trader/gains', authMiddleware, requireRole('trader', 'admin'), async (_req, res) => {
   const strategy = (typeof _req.query.strategy === 'string' ? _req.query.strategy : 'fifo').toLowerCase();
   const reqAny = _req as any;
-  const rows = await prisma.walletTransaction.findMany({ where: { userId: reqAny.userId, type: 'trade' } });
-  const txs: WalletTx[] = rows.map(r=>({ id: r.id, userId: r.userId, symbol: r.symbol, amount: r.amount, priceUsd: (r.priceUsdCents ?? 0)/100, type: 'trade', timestamp: r.timestamp.toISOString(), source: safeDecrypt(r.sourceEnc) }));
-  // placeholder: $50 gain per trade, FIFO/LIFO just changes ordering count
-  const sorted = [...txs].sort((a,b)=> strategy==='lifo' ? (a.timestamp<b.timestamp?1:-1) : (a.timestamp<b.timestamp?-1:1));
-  const realizedGainsUsd = sorted.length * 50;
-  const shortTermUsd = Math.round(realizedGainsUsd * 0.7);
-  const longTermUsd = realizedGainsUsd - shortTermUsd;
-  res.json({ strategy, realizedGainsUsd, shortTermUsd, longTermUsd });
+  const rows = await prisma.walletTransaction.findMany({ where: { userId: reqAny.userId, type: 'trade' }, orderBy: { timestamp: 'asc' } });
+  const txs = rows.map(r=>({ symbol: r.symbol, amount: r.amount, price: (r.priceUsdCents ?? 0)/100, date: r.timestamp }));
+  const result = computeGains(txs, strategy === 'lifo' ? 'lifo' : 'fifo');
+  res.json(result.summary);
 });
+
+app.get('/api/trader/gains/full', authMiddleware, requireRole('trader', 'admin'), async (_req, res) => {
+  const strategy = (typeof _req.query.strategy === 'string' ? _req.query.strategy : 'fifo').toLowerCase();
+  const reqAny = _req as any;
+  const rows = await prisma.walletTransaction.findMany({ where: { userId: reqAny.userId, type: 'trade' }, orderBy: { timestamp: 'asc' } });
+  const txs = rows.map(r=>({ symbol: r.symbol, amount: r.amount, price: (r.priceUsdCents ?? 0)/100, date: r.timestamp }));
+  const result = computeGains(txs, strategy === 'lifo' ? 'lifo' : 'fifo');
+  res.json(result);
+});
+
+type TradeTx = { symbol: string; amount: number; price: number; date: Date };
+type Lot = { remaining: number; price: number; date: Date };
+function computeGinsForSymbol(txs: TradeTx[], method: 'fifo'|'lifo'){
+  const buys: Lot[] = [];
+  const sales: { date: Date; qty: number; proceeds: number; cost: number; gain: number; term: 'short'|'long' }[] = [];
+  const pick = (arr: Lot[]) => method==='fifo' ? arr.shift()! : arr.pop()!;
+  for (const tx of txs) {
+    if (tx.amount > 0) {
+      buys.push({ remaining: tx.amount, price: tx.price, date: tx.date });
+    } else if (tx.amount < 0) {
+      let qtyToSell = -tx.amount;
+      let proceeds = qtyToSell * tx.price;
+      let costSum = 0;
+      while (qtyToSell > 0 && buys.length > 0) {
+        const lot = pick(buys);
+        const useQty = Math.min(qtyToSell, lot.remaining);
+        const cost = useQty * lot.price;
+        costSum += cost;
+        lot.remaining -= useQty;
+        qtyToSell -= useQty;
+        if (lot.remaining > 0) {
+          if (method==='fifo') buys.unshift(lot); else buys.push(lot);
+        }
+      }
+      const gain = proceeds - costSum;
+      const heldDays = buys.length>0 ? Math.floor((+tx.date - +buys[0].date)/86400000) : 0;
+      const term = heldDays >= 365 ? 'long' : 'short';
+      sales.push({ date: tx.date, qty: -tx.amount, proceeds, cost: costSum, gain, term });
+    }
+  }
+  const summary = {
+    realizedGainsUsd: Math.round(sales.reduce((s, r)=> s + r.gain, 0)),
+    shortTermUsd: Math.round(sales.filter(r=>r.term==='short').reduce((s,r)=> s + r.gain, 0)),
+    longTermUsd: Math.round(sales.filter(r=>r.term==='long').reduce((s,r)=> s + r.gain, 0))
+  };
+  return { sales, summary };
+}
+
+function computeGains(txs: TradeTx[], method: 'fifo'|'lifo'){
+  const bySymbol: Record<string, TradeTx[]> = {};
+  for (const t of txs) {
+    bySymbol[t.symbol] = (bySymbol[t.symbol] || []).concat(t);
+  }
+  const symbols = Object.keys(bySymbol);
+  const details = symbols.map(sym => ({ symbol: sym, ...computeGinsForSymbol(bySymbol[sym], method) }));
+  const allSales = details.flatMap(d => d.sales);
+  const summary = {
+    strategy: method,
+    realizedGainsUsd: Math.round(allSales.reduce((s,r)=> s + r.gain, 0)),
+    shortTermUsd: Math.round(allSales.filter(r=>r.term==='short').reduce((s,r)=> s + r.gain, 0)),
+    longTermUsd: Math.round(allSales.filter(r=>r.term==='long').reduce((s,r)=> s + r.gain, 0))
+  };
+  return { summary, details };
+}
 
 const port = process.env.PORT || 4000;
 app.listen(port, () => {
