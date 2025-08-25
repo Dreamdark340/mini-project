@@ -20,6 +20,10 @@ const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_me';
 
 type JwtPayload = { sub: string };
 
+// In-memory wallet store (per user)
+type WalletTx = { id: string; userId: string; symbol: string; amount: number; priceUsd?: number; type: 'trade'|'staking'|'airdrop'|'mining'; timestamp: string; source?: string };
+const userIdToWalletTxs: Record<string, WalletTx[]> = Object.create(null);
+
 function signToken(userId: string) {
   return jwt.sign({ sub: userId } as JwtPayload, JWT_SECRET, { expiresIn: '7d' });
 }
@@ -314,22 +318,49 @@ function generateEmployeeId() {
 
 // Trader APIs (stubs)
 app.get('/api/trader/forecast', authMiddleware, requireRole('trader', 'admin'), async (_req, res) => {
-  // Placeholder forecast based on demo data
-  res.json({
-    holdings: [
-      { symbol: 'BTC', amount: 0.25, priceUsd: 65000, valueUsd: 16250 },
-      { symbol: 'ETH', amount: 3.5, priceUsd: 3200, valueUsd: 11200 }
-    ],
-    totalValueUsd: 27450,
-    realizedGainsYtdUsd: 1250,
-    unrealizedGainsUsd: 3450,
-    estimatedTaxUsd: 375
+  // Build from in-memory txs if available, else demo
+  const reqAny = _req as any;
+  const txs = userIdToWalletTxs[reqAny.userId] || [];
+  if (txs.length === 0) {
+    return res.json({
+      holdings: [
+        { symbol: 'BTC', amount: 0.25, priceUsd: 65000, valueUsd: 16250 },
+        { symbol: 'ETH', amount: 3.5, priceUsd: 3200, valueUsd: 11200 }
+      ],
+      totalValueUsd: 27450,
+      realizedGainsYtdUsd: 1250,
+      unrealizedGainsUsd: 3450,
+      estimatedTaxUsd: 375
+    });
+  }
+  const symbolToAmount: Record<string, number> = {};
+  for (const tx of txs) {
+    symbolToAmount[tx.symbol] = (symbolToAmount[tx.symbol] || 0) + tx.amount;
+  }
+  // naive pricing placeholders
+  const priceMap: Record<string, number> = { BTC: 65000, ETH: 3200 };
+  const holdings = Object.entries(symbolToAmount).map(([sym, amt]) => {
+    const price = priceMap[sym] || 1;
+    return { symbol: sym, amount: amt, priceUsd: price, valueUsd: amt * price };
   });
+  const totalValueUsd = holdings.reduce((s, h) => s + h.valueUsd, 0);
+  // basic placeholders for gains and taxes
+  const realizedGainsYtdUsd = Math.max(0, txs.filter(t=>t.type==='trade').reduce((s,_t)=> s + 50, 0));
+  const unrealizedGainsUsd = Math.round(totalValueUsd * 0.12);
+  const estimatedTaxUsd = Math.round(realizedGainsYtdUsd * 0.15);
+  res.json({ holdings, totalValueUsd, realizedGainsYtdUsd, unrealizedGainsUsd, estimatedTaxUsd });
 });
 
 app.post('/api/trader/import/csv', authMiddleware, requireRole('trader', 'admin'), async (_req, res) => {
   // For now, just acknowledge receipt; in future accept multipart/form-data
-  res.json({ ok: true, imported: 0, message: 'CSV import stub. Implement parsing later.' });
+  const reqAny = _req as any;
+  const now = new Date().toISOString();
+  const sample: WalletTx[] = [
+    { id: `tx_${Date.now()}_1`, userId: reqAny.userId, symbol: 'BTC', amount: 0.1, priceUsd: 60000, type: 'trade', timestamp: now, source: 'CSV' },
+    { id: `tx_${Date.now()}_2`, userId: reqAny.userId, symbol: 'ETH', amount: 1.2, priceUsd: 3000, type: 'trade', timestamp: now, source: 'CSV' }
+  ];
+  userIdToWalletTxs[reqAny.userId] = (userIdToWalletTxs[reqAny.userId] || []).concat(sample);
+  res.json({ ok: true, imported: sample.length, message: 'Imported sample transactions (stub).' });
 });
 
 app.get('/api/trader/report.pdf', authMiddleware, requireRole('trader', 'admin'), async (_req, res) => {
@@ -337,6 +368,26 @@ app.get('/api/trader/report.pdf', authMiddleware, requireRole('trader', 'admin')
   res.setHeader('Content-Disposition', 'attachment; filename="crypto_tax_report.pdf"');
   const pdf = Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF');
   res.end(pdf);
+});
+
+// List transactions (in-memory store)
+app.get('/api/trader/transactions', authMiddleware, requireRole('trader', 'admin'), async (_req, res) => {
+  const reqAny = _req as any;
+  const items = userIdToWalletTxs[reqAny.userId] || [];
+  res.json({ transactions: items });
+});
+
+// Gains calculation (FIFO/LIFO - simplified placeholder)
+app.get('/api/trader/gains', authMiddleware, requireRole('trader', 'admin'), async (_req, res) => {
+  const strategy = (typeof _req.query.strategy === 'string' ? _req.query.strategy : 'fifo').toLowerCase();
+  const reqAny = _req as any;
+  const txs = (userIdToWalletTxs[reqAny.userId] || []).filter(t=>t.type==='trade');
+  // placeholder: $50 gain per trade, FIFO/LIFO just changes ordering count
+  const sorted = [...txs].sort((a,b)=> strategy==='lifo' ? (a.timestamp<b.timestamp?1:-1) : (a.timestamp<b.timestamp?-1:1));
+  const realizedGainsUsd = sorted.length * 50;
+  const shortTermUsd = Math.round(realizedGainsUsd * 0.7);
+  const longTermUsd = realizedGainsUsd - shortTermUsd;
+  res.json({ strategy, realizedGainsUsd, shortTermUsd, longTermUsd });
 });
 
 const port = process.env.PORT || 4000;
