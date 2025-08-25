@@ -276,20 +276,23 @@
             }
         }
 
-        // Change password (demo validation retained)
-        function changePassword(event) {
+        // Change password via backend
+        async function changePassword(event) {
             event.preventDefault();
             const currentPassword = document.getElementById('currentPassword').value;
             const newPassword = document.getElementById('newPassword').value;
             const confirmPassword = document.getElementById('confirmPassword').value;
-            if (currentPassword !== 'password') { alert('Current password is incorrect.'); return; }
             if (newPassword !== confirmPassword) { alert('New passwords do not match.'); return; }
             const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
             if (!passwordRegex.test(newPassword)) { alert('Password does not meet requirements.'); return; }
-            alert('Password changed successfully! (This is a demo - no actual password change occurs)');
-            document.getElementById('changePasswordForm').reset();
-            const username = getUsername();
-            if (window.addAuditLog) { window.addAuditLog(username, 'Change Password', 'Password changed successfully', 'medium'); }
+            try{
+                const resp = await fetch(`${API_BASE}/api/auth/change-password`, { method:'POST', headers: authHeaders(), body: JSON.stringify({ currentPassword, newPassword }) });
+                if(!resp.ok){ const er = await resp.json().catch(()=>({error:'Failed'})); alert(er.error || 'Failed to change password'); return; }
+                alert('Password changed successfully!');
+                document.getElementById('changePasswordForm').reset();
+            }catch{
+                alert('Network error changing password');
+            }
         }
 
         // Login history
