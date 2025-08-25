@@ -367,6 +367,26 @@ app.get('/api/tax/form16/:year/pdf', authMiddleware, async (req: any, res) => {
   const pdf = Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF');
   res.end(pdf);
 });
+
+// HR: TDS preview for a prospective payroll entry
+app.post('/api/hr/tax/preview', authMiddleware, requireRole('hr', 'admin'), async (req: any, res) => {
+  const schema = z.object({ username: z.string(), baseSalary: z.number().int().nonnegative(), bonus: z.number().int().nonnegative().default(0), deductions: z.number().int().nonnegative().default(0) });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid payload' });
+  const { username, baseSalary, bonus, deductions } = parsed.data;
+  const user = await prisma.user.findUnique({ where: { username } });
+  const me = await prisma.user.findUnique({ where: { id: req.userId } });
+  if (!user || user.companyId !== me?.companyId) return res.status(404).json({ error: 'User not found' });
+  const profile = await prisma.employeeTaxProfile.findUnique({ where: { userId: user.id } });
+  const regime = profile?.regime || 'old';
+  const slabs = await prisma.taxSlab.findMany({ where: { companyId: user.companyId, regime } });
+  const annualGross = 12 * (baseSalary + bonus);
+  const annualDeductions = 12 * deductions + (profile?.section80C || 0) + (profile?.hraExempt || 0) + (profile?.ltaExempt || 0);
+  const taxable = Math.max(0, annualGross - annualDeductions);
+  const annualTax = computeTDS(taxable, slabs);
+  const monthlyTDS = Math.floor(annualTax / 12);
+  res.json({ monthlyTDS, regime });
+});
 // Admin: Companies
 app.get('/api/admin/companies', authMiddleware, requireRole('admin'), async (_req, res) => {
   const companies = await prisma.company.findMany({ orderBy: { name: 'asc' } });
