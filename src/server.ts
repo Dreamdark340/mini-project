@@ -5,11 +5,16 @@ import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
 import speakeasy from 'speakeasy';
 import { z } from 'zod';
+import rateLimit from 'express-rate-limit';
 
 const prisma = new PrismaClient();
 const app = express();
 app.use(cors());
 app.use(express.json());
+// Rate limiting for auth-related endpoints
+const authLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 50 });
+app.use('/api/auth', authLimiter);
+app.use('/api/2fa', authLimiter);
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_me';
 
