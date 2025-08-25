@@ -28,8 +28,6 @@
         document.getElementById('recoveryCode').parentElement.style.display='none';
         document.getElementById('twoFABadge').textContent='Enter 6-digit code';
       });
-      // Connectivity check
-      pingHealth();
       // Role switcher
       initRoleSwitcher();
     }
@@ -58,9 +56,7 @@
         } else {
           finalizeLoginWithToken(username, data);
         }
-      }catch(err){
-        showError('Network error. Is the API running at http://localhost:4000?');
-      }
+      }catch(err){ showError('Network error. Try again.'); }
     }
 
     async function onTwoFASubmit(e){
@@ -90,18 +86,6 @@
       if(role === 'hr' || role === 'admin'){ window.location.href='hr-dashboard.html'; } else { window.location.href='employee-profile.html'; }
     }
 
-    async function pingHealth(){
-      try{
-        const r = await fetch(`${API_BASE}/health`, { method:'GET' });
-        if(!r.ok) throw new Error('bad');
-        document.getElementById('apiStatus').textContent='API: Online';
-        document.getElementById('apiStatus').className='status-badge success';
-      }catch{
-        document.getElementById('apiStatus').textContent='API: Offline';
-        document.getElementById('apiStatus').className='status-badge danger';
-      }
-    }
-
     function initRoleSwitcher(){
       const select = document.getElementById('roleSelect');
       if(!select) return;
@@ -123,7 +107,7 @@
       <div class="auth-header">
         <div class="brand"><i class="fas fa-chart-line"></i> Payroll Management</div>
         <h1>Sign in to your account</h1>
-        <div class="hint">Use role switcher below to autofill demo users. <span id="apiStatus" class="status-badge">Checking API...</span></div>
+        <div class="hint">Use role switcher below to autofill demo users.</div>
       </div>
       <div id="errorBox" class="error"></div>
 
