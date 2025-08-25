@@ -31,14 +31,44 @@ function authMiddleware(req: any, res: any, next: any) {
   }
 }
 
+function requireRole(...roles: string[]) {
+  return async (req: any, res: any, next: any) => {
+    const userId = (req as any).userId;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+    if (!roles.includes(user.role)) return res.status(403).json({ error: 'Forbidden' });
+    next();
+  };
+}
+
 // Seed demo user if not exists
 app.get('/health', async (_req, res) => {
-  const user = await prisma.user.findUnique({ where: { username: 'aaron' } });
-  if (!user) {
+  // seed employee
+  const emp = await prisma.user.findUnique({ where: { username: 'aaron' } });
+  if (!emp) {
     const hash = await bcrypt.hash('password', 10);
     await prisma.user.create({ data: {
       username: 'aaron', email: 'aaron@company.com', passwordHash: hash,
       fullName: 'Aaron Employee', department: 'Operations', employeeId: 'EMP0001'
+    }});
+  }
+  // seed hr
+  const hr = await prisma.user.findUnique({ where: { username: 'hr1' } });
+  if (!hr) {
+    const hash = await bcrypt.hash('password', 10);
+    await prisma.user.create({ data: {
+      username: 'hr1', email: 'hr1@company.com', passwordHash: hash,
+      fullName: 'Harper HR', department: 'HR', employeeId: 'EMP9001', role: 'hr'
+    }});
+  }
+  // seed admin
+  const admin = await prisma.user.findUnique({ where: { username: 'admin' } });
+  if (!admin) {
+    const hash = await bcrypt.hash('admin123', 10);
+    await prisma.user.create({ data: {
+      username: 'admin', email: 'admin@company.com', passwordHash: hash,
+      fullName: 'Alex Admin', department: 'Admin', employeeId: 'EMP9999', role: 'admin'
     }});
   }
   res.json({ ok: true });
@@ -161,11 +191,48 @@ app.get('/api/reports/:id/pdf', authMiddleware, async (_req, res) => {
   res.end(pdf);
 });
 
+// HR Endpoints (hr or admin)
+app.get('/api/hr/employees', authMiddleware, requireRole('hr', 'admin'), async (_req, res) => {
+  const employees = await prisma.user.findMany({
+    select: { id: true, username: true, email: true, fullName: true, role: true, department: true, employeeId: true, lastLoginAt: true },
+    orderBy: { username: 'asc' }
+  });
+  res.json({ employees });
+});
+
+app.post('/api/hr/employees', authMiddleware, requireRole('hr', 'admin'), async (req, res) => {
+  const schema = z.object({ username: z.string(), email: z.string().email(), fullName: z.string(), department: z.string().optional(), role: z.enum(['employee', 'hr', 'admin']).default('employee'), password: z.string().min(6) });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid payload' });
+  const { username, email, fullName, department, role, password } = parsed.data;
+  const existing = await prisma.user.findFirst({ where: { OR: [{ username }, { email }] } });
+  if (existing) return res.status(409).json({ error: 'User exists' });
+  const hash = await bcrypt.hash(password, 10);
+  const newEmp = await prisma.user.create({ data: {
+    username, email, fullName, department, role, passwordHash: hash, employeeId: generateEmployeeId()
+  }});
+  res.status(201).json({ id: newEmp.id });
+});
+
+app.put('/api/hr/employees/:id/role', authMiddleware, requireRole('hr', 'admin'), async (req, res) => {
+  const schema = z.object({ role: z.enum(['employee', 'hr', 'admin']) });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid payload' });
+  const { id } = req.params;
+  const updated = await prisma.user.update({ where: { id }, data: { role: parsed.data.role } });
+  res.json({ ok: true, role: updated.role });
+});
+
 function randomCode() {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
   const rand = Array.from({ length: 4 }, () => alphabet[Math.floor(Math.random()*alphabet.length)]).join('');
   const rand2 = Array.from({ length: 4 }, () => alphabet[Math.floor(Math.random()*alphabet.length)]).join('');
   return `${rand}-${rand2}`;
+}
+
+function generateEmployeeId() {
+  const num = Math.floor(Math.random() * 9000) + 1000;
+  return `EMP${num}`;
 }
 
 const port = process.env.PORT || 4000;
