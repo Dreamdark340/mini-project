@@ -7,20 +7,11 @@
   <link rel="stylesheet" href="style.css">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
   <script>
-    // Base32 + util + TOTP
-    const Base32 = (() => { const alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; const charToVal=Object.fromEntries([...alphabet].map((c,i)=>[c,i])); return { encode(bytes){let bits=0,value=0,out=''; for(let i=0;i<bytes.length;i++){ value=(value<<8)|bytes[i]; bits+=8; while(bits>=5){ out+=alphabet[(value>>>(bits-5))&31]; bits-=5; } } if(bits>0){ out+=alphabet[(value<<(5-bits))&31]; } return out; }, decode(str){ const clean=str.toUpperCase().replace(/=+$/,''); let bits=0,value=0; const out=[]; for(let i=0;i<clean.length;i++){ const ch=clean[i]; const val=charToVal[ch]; if(val===undefined) continue; value=(value<<5)|val; bits+=5; if(bits>=8){ out.push((value>>>(bits-8))&255); bits-=8; } } return new Uint8Array(out); } }; })();
-    function getRandomBytes(n){ const b=new Uint8Array(n); crypto.getRandomValues(b); return b; }
-    function generateId(prefix='id'){ const now=Date.now().toString(36); const rand=Base32.encode(getRandomBytes(10)).slice(0,12).toLowerCase(); return `${prefix}_${now}_${rand}`; }
-    async function generateTOTPAtTime(base32Secret, epochSeconds, step, digits){ const keyBytes=Base32.decode(base32Secret); const counter=Math.floor(epochSeconds/step); const buf=new ArrayBuffer(8); const view=new DataView(buf); view.setUint32(0,Math.floor(counter/0x100000000)); view.setUint32(4,counter>>>0); const key=await crypto.subtle.importKey('raw',keyBytes,{name:'HMAC',hash:'SHA-1'},false,['sign']); const hmac=new Uint8Array(await crypto.subtle.sign('HMAC',key,buf)); const off=hmac[hmac.length-1]&0x0f; const codeInt=((hmac[off]&0x7f)<<24)|(hmac[off+1]<<16)|(hmac[off+2]<<8)|hmac[off+3]; const mod=10**digits; return (codeInt%mod).toString().padStart(digits,'0'); }
-    async function verifyTOTPCode(base32Secret, userCode){ const digits=userCode.length; const now=Math.floor(Date.now()/1000); for(const off of [0,-1,1]){ const code=await generateTOTPAtTime(base32Secret, now+off*30, 30, digits); if(code===userCode) return true; } return false; }
-
-    // Keys
-    function securityKey(u){ return `security_${u}`; }
-    function sessionsKey(u){ return `sessions_${u}`; }
-    function getSecurity(u){ const raw=localStorage.getItem(securityKey(u)); return raw?JSON.parse(raw):{ twoFAEnabled:false, twoFASecret:null, recoveryCodes:[] }; }
-    function getSessions(u){ const raw=localStorage.getItem(sessionsKey(u)); return raw?JSON.parse(raw):[]; }
-    function setSessions(u,s){ localStorage.setItem(sessionsKey(u), JSON.stringify(s)); }
-
+    const API_BASE = 'http://localhost:4000';
+    function generateId(prefix='id'){ return `${prefix}_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}`; }
+    function getSessions(u){ return []; }
+    function setSessions(u,s){}
+    function getSecurity(u){ return { twoFAEnabled: true }; }
     function showError(msg){ const el=document.getElementById('errorBox'); el.textContent=msg; el.style.display='block'; }
     function clearError(){ const el=document.getElementById('errorBox'); el.style.display='none'; el.textContent=''; }
 
@@ -48,71 +39,47 @@
       const password=document.getElementById('password').value||'';
       rememberMe=document.getElementById('remember').checked;
       if(!username || !password){ showError('Enter username and password.'); return; }
-      // Demo password check
-      if(password !== 'password'){ showError('Invalid username or password.'); return; }
-      const sec=getSecurity(username);
-      pendingUser=username;
-      if(sec.twoFAEnabled){
-        // Show 2FA step
-        document.getElementById('loginForm').style.display='none';
-        document.getElementById('twoFAStep').style.display='block';
-        document.getElementById('twoFAUser').textContent=username;
-        document.getElementById('recoveryCode').parentElement.style.display='none';
-        document.getElementById('twoFACode').focus();
-      } else {
-        finalizeLogin(username);
-      }
+      // Call backend
+      try{
+        const resp = await fetch(`${API_BASE}/api/auth/login`, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ username, password, userAgent: navigator.userAgent }) });
+        if(!resp.ok){ showError('Invalid username or password.'); return; }
+        const data = await resp.json();
+        pendingUser=username;
+        if(data.twoFARequired){
+          document.getElementById('loginForm').style.display='none';
+          document.getElementById('twoFAStep').style.display='block';
+          document.getElementById('twoFAUser').textContent=username;
+          document.getElementById('recoveryCode').parentElement.style.display='none';
+          document.getElementById('twoFACode').focus();
+        } else {
+          finalizeLoginWithToken(username, data);
+        }
+      }catch(err){ showError('Network error. Try again.'); }
     }
 
     async function onTwoFASubmit(e){
       e.preventDefault(); clearError();
       const username=pendingUser; if(!username){ showError('Session expired. Try again.'); return; }
-      const sec=getSecurity(username);
       const code=(document.getElementById('twoFACode').value||'').trim();
       const rec=(document.getElementById('recoveryCode').value||'').trim();
-      if(!sec.twoFAEnabled){ finalizeLogin(username); return; }
       try{
-        if(rec){
-          const idx=sec.recoveryCodes.indexOf(rec);
-          if(idx===-1){ showError('Invalid recovery code.'); return; }
-          // consume code
-          sec.recoveryCodes.splice(idx,1);
-          localStorage.setItem(securityKey(username), JSON.stringify(sec));
-          finalizeLogin(username);
-          return;
-        }
-        if(!/^\d{6}$/.test(code)){ showError('Enter a valid 6-digit code.'); return; }
-        const ok=await verifyTOTPCode(sec.twoFASecret, code);
-        if(!ok){ showError('Incorrect 2FA code.'); return; }
-        finalizeLogin(username);
-      }catch(err){ showError('Crypto not available in this browser.'); }
+        const resp = await fetch(`${API_BASE}/api/auth/2fa`, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ username, code: code || undefined, recoveryCode: rec || undefined, userAgent: navigator.userAgent }) });
+        if(!resp.ok){ showError('Invalid 2FA verification.'); return; }
+        const data = await resp.json();
+        finalizeLoginWithToken(username, data);
+      }catch(err){ showError('Network error. Try again.'); }
     }
 
-    function finalizeLogin(username){
-      // Set auth artifacts
-      const token=generateId('token');
+    function finalizeLoginWithToken(username, data){
+      const { token, sessionId, user } = data;
+      if(!token){ showError('Login failed.'); return; }
       localStorage.setItem('authToken', token);
-      localStorage.setItem('userRole', 'employee');
-      localStorage.setItem('username', username);
+      localStorage.setItem('userRole', user?.role || 'employee');
+      localStorage.setItem('username', user?.username || username);
+      if(sessionId) localStorage.setItem('currentSessionId', sessionId);
       if(rememberMe){ localStorage.setItem('rememberMe', '1'); } else { localStorage.removeItem('rememberMe'); }
-
-      // Create current session
-      const sessionId=generateId('sess');
-      localStorage.setItem('currentSessionId', sessionId);
-      const ua=navigator.userAgent;
-      const now=new Date().toISOString();
-      const sessions=getSessions(username);
-      sessions.forEach(s=>{ s.isCurrent=false; });
-      sessions.push({ id: sessionId, createdAt: now, lastActiveAt: now, userAgent: ua, device: ua.substring(0,40), ipAddress: 'Unknown', location: 'Unknown', isCurrent: true });
-      setSessions(username, sessions);
-
-      // Login history
-      const key=`loginHistory_${username}`;
-      const hist=JSON.parse(localStorage.getItem(key) || '[]');
-      hist.unshift({ timestamp: now, ipAddress: 'Unknown', device: ua, status: 'Success', location: 'Unknown' });
-      localStorage.setItem(key, JSON.stringify(hist.slice(0,50)));
-
-      // Redirect
+      const key=`loginHistory_${username}`; const ua=navigator.userAgent; const now=new Date().toISOString();
+      const hist=JSON.parse(localStorage.getItem(key) || '[]'); hist.unshift({ timestamp: now, ipAddress: 'Unknown', device: ua, status: 'Success', location: 'Unknown' }); localStorage.setItem(key, JSON.stringify(hist.slice(0,50)));
       window.location.href='employee-profile.html';
     }
 

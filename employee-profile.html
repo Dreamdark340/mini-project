@@ -119,7 +119,9 @@
         }
 
         // Global state
+        const API_BASE = 'http://localhost:4000';
         let currentProfile = {};
+        function authHeaders(){ const t=localStorage.getItem('authToken'); return { 'Content-Type':'application/json', 'Authorization': `Bearer ${t}` }; }
 
         function getUsername() { return localStorage.getItem('username'); }
         function profileKey(username) { return `profile_${username}`; }
@@ -208,25 +210,31 @@
         }
 
         // Load profile data
-        function loadProfileData() {
+        async function loadProfileData() {
             const username = getUsername();
-            const storedProfile = localStorage.getItem(profileKey(username));
-            if (storedProfile) {
-                currentProfile = JSON.parse(storedProfile);
-            } else {
+            try{
+                const resp = await fetch(`${API_BASE}/api/profile`, { headers: authHeaders() });
+                if(!resp.ok) throw new Error('Failed');
+                const p = await resp.json();
                 currentProfile = {
-                    name: username,
-                    username: username,
-                    email: `${username}@company.com`,
-                    phone: '+1 (555) 123-4567',
-                    department: 'Operations',
-                    role: 'Employee',
-                    employeeId: `EMP${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`,
-                    lastLogin: new Date().toISOString()
+                    name: p.fullName || username,
+                    username: p.username || username,
+                    email: p.email || `${username}@company.com`,
+                    phone: p.phone || '+1 (555) 123-4567',
+                    department: p.department || 'Operations',
+                    role: p.role || 'Employee',
+                    employeeId: p.employeeId || 'EMP0000',
+                    lastLogin: p.lastLoginAt || new Date().toISOString(),
+                    twoFAEnabled: !!p.twoFAEnabled
                 };
-                localStorage.setItem(profileKey(username), JSON.stringify(currentProfile));
+                displayProfile();
+                refreshSecurityUI();
+            }catch{
+                // fallback to existing local demo profile
+                const storedProfile = localStorage.getItem(profileKey(username));
+                if (storedProfile) { currentProfile = JSON.parse(storedProfile); } else { currentProfile = { name: username, username, email: `${username}@company.com`, phone: '+1 (555) 123-4567', department: 'Operations', role: 'Employee', employeeId: `EMP${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`, lastLogin: new Date().toISOString(), twoFAEnabled: false }; localStorage.setItem(profileKey(username), JSON.stringify(currentProfile)); }
+                displayProfile();
             }
-            displayProfile();
         }
 
         // Display profile information
@@ -252,19 +260,19 @@
         function closeEditModal() { document.getElementById('editProfileModal').style.display = 'none'; }
 
         // Save profile changes
-        function saveProfile(event) {
+        async function saveProfile(event) {
             event.preventDefault();
-            const username = getUsername();
-            currentProfile.name = document.getElementById('editName').value;
-            currentProfile.email = document.getElementById('editEmail').value;
-            currentProfile.phone = document.getElementById('editPhone').value;
-            currentProfile.department = document.getElementById('editDepartment').value;
-            localStorage.setItem(profileKey(username), JSON.stringify(currentProfile));
-            displayProfile();
-            closeEditModal();
-            alert('Profile updated successfully!');
-            if (window.addAuditLog) {
-                window.addAuditLog(username, 'Update Profile', 'Updated personal profile information', 'low');
+            const fullName = document.getElementById('editName').value;
+            const email = document.getElementById('editEmail').value;
+            const phone = document.getElementById('editPhone').value;
+            const department = document.getElementById('editDepartment').value;
+            try{
+                const resp = await fetch(`${API_BASE}/api/profile`, { method:'PUT', headers: authHeaders(), body: JSON.stringify({ fullName, email, phone, department }) });
+                if(!resp.ok) throw new Error('Failed');
+                currentProfile.name = fullName; currentProfile.email = email; currentProfile.phone = phone; currentProfile.department = department;
+                displayProfile(); closeEditModal(); alert('Profile updated successfully!');
+            }catch{
+                alert('Failed to update profile.');
             }
         }
 
@@ -326,8 +334,7 @@
 
         // 2FA UI and logic
         function refreshSecurityUI() {
-            const username = getUsername();
-            const sec = getSecurityState(username);
+            const sec = { twoFAEnabled: !!currentProfile.twoFAEnabled };
             const btn = document.getElementById('twoFAButton');
             if (!btn) return;
             if (sec.twoFAEnabled) {
@@ -336,18 +343,20 @@
                 btn.innerHTML = '<i class="fas fa-mobile-alt"></i> Enable 2FA';
             }
         }
-        function enable2FA() {
-            const username = getUsername();
-            const sec = getSecurityState(username);
+        async function enable2FA() {
             // Prepare modal content
             const modal = document.getElementById('twoFAModal');
             const body = document.getElementById('twoFAModalBody');
-            if (!sec.twoFAEnabled) {
-                // New setup flow
-                const secret = Base32.encode(getRandomBytes(20));
-                const issuer = encodeURIComponent('PayrollPro');
-                const label = encodeURIComponent(`PayrollPro:${username}`);
-                const uri = `otpauth://totp/${label}?secret=${secret}&issuer=${issuer}&digits=6&period=30&algorithm=SHA1`;
+            if (!currentProfile.twoFAEnabled) {
+                // New setup flow via backend
+                let setup;
+                try{
+                    const resp = await fetch(`${API_BASE}/api/2fa/setup`, { method:'POST', headers: authHeaders() });
+                    if(!resp.ok) throw new Error('Failed');
+                    setup = await resp.json();
+                }catch{ alert('Failed to start 2FA setup.'); return; }
+                const secret = setup.base32;
+                const uri = setup.otpauthUrl;
                 const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(uri)}`;
                 body.innerHTML = `
                     <div class="form-grid">
@@ -373,14 +382,11 @@
                     </div>
                 `;
             } else {
-                // Management: show recovery codes, option to disable
-                const recoveryCodes = (sec.recoveryCodes && sec.recoveryCodes.length) ? sec.recoveryCodes : [];
+                // Management: show actions
                 body.innerHTML = `
                     <div class="form-group">
                         <label>Two-Factor Authentication is enabled</label>
-                        <div class="small muted">Keep your recovery codes in a safe place.</div>
-                        <div class="code-grid">${recoveryCodes.map(c => `<div class=\"code-item\">${c}</div>`).join('')}</div>
-                        <div class="small muted" style="margin-top:0.5rem;">You can regenerate recovery codes if needed.</div>
+                        <div class="small muted">You can regenerate recovery codes if needed.</div>
                     </div>
                     <div class="modal-actions" style="display:flex; gap:0.5rem; justify-content:space-between; margin-top: 0.75rem;">
                         <div>
@@ -401,42 +407,44 @@
             const code = (input.value || '').trim();
             if (!/^\d{6}$/.test(code)) { alert('Enter a valid 6-digit code.'); return; }
             try {
-                const ok = await verifyTOTPCode(secret, code);
-                if (!ok) { alert('Invalid code. Try again.'); return; }
-                const username = getUsername();
-                const recoveryCodes = generateRecoveryCodes(10);
-                setSecurityState(username, { twoFAEnabled: true, twoFASecret: secret, recoveryCodes });
+                const resp = await fetch(`${API_BASE}/api/2fa/enable`, { method:'POST', headers: authHeaders(), body: JSON.stringify({ base32: secret, code }) });
+                if(!resp.ok){ alert('Invalid code. Try again.'); return; }
+                const data = await resp.json();
+                currentProfile.twoFAEnabled = true;
                 alert('Two-Factor Authentication enabled. Save your recovery codes!');
-                closeTwoFAModal();
+                const body = document.getElementById('twoFAModalBody');
+                body.innerHTML = `<div class="form-group"><label>Recovery Codes</label><div class="code-grid">${(data.recoveryCodes||[]).map((c)=>`<div class=\"code-item\">${c}</div>`).join('')}</div></div><div class="modal-actions" style="justify-content:flex-end; display:flex; gap:0.5rem; margin-top:0.75rem;"><button class="primary-btn" onclick="closeTwoFAModal()">Done</button></div>`;
                 refreshSecurityUI();
-                if (window.addAuditLog) { window.addAuditLog(username, 'Enable 2FA', 'User enabled 2FA', 'high'); }
             } catch (e) {
-                alert('Your browser blocked crypto operations. Try a modern browser.');
+                alert('Failed to enable 2FA.');
             }
         }
         function regenerateRecoveryCodes() {
-            const username = getUsername();
-            const sec = getSecurityState(username);
-            if (!sec.twoFAEnabled) return;
-            sec.recoveryCodes = generateRecoveryCodes(10);
-            setSecurityState(username, sec);
-            enable2FA(); // re-render modal
-            alert('New recovery codes generated. Store them securely.');
+            fetch(`${API_BASE}/api/2fa/recovery/regenerate`, { method:'POST', headers: authHeaders() })
+                .then(r=> r.json())
+                .then(d=>{
+                    const body = document.getElementById('twoFAModalBody');
+                    body.innerHTML = `<div class="form-group"><label>New Recovery Codes</label><div class="code-grid">${(d.recoveryCodes||[]).map((c)=>`<div class=\"code-item\">${c}</div>`).join('')}</div></div><div class="modal-actions" style="justify-content:flex-end; display:flex; gap:0.5rem; margin-top:0.75rem;"><button class="primary-btn" onclick="closeTwoFAModal()">Done</button></div>`;
+                    alert('New recovery codes generated. Store them securely.');
+                })
+                .catch(()=> alert('Failed to regenerate recovery codes.'));
         }
         function disable2FA() {
             if (!confirm('Disable 2FA? You will no longer be prompted for verification codes.')) return;
-            const username = getUsername();
-            setSecurityState(username, { twoFAEnabled: false, twoFASecret: null, recoveryCodes: [] });
-            closeTwoFAModal();
-            refreshSecurityUI();
-            if (window.addAuditLog) { window.addAuditLog(username, 'Disable 2FA', 'User disabled 2FA', 'high'); }
+            fetch(`${API_BASE}/api/2fa/disable`, { method:'POST', headers: authHeaders() })
+                .then(()=>{ currentProfile.twoFAEnabled = false; closeTwoFAModal(); refreshSecurityUI(); })
+                .catch(()=> alert('Failed to disable 2FA'));
         }
         function closeTwoFAModal() { document.getElementById('twoFAModal').style.display = 'none'; }
 
         // Sessions UI
-        function viewSessions() {
-            const username = getUsername();
-            const sessions = getSessions(username);
+        async function viewSessions() {
+            const currentId = localStorage.getItem('currentSessionId');
+            let sessions = [];
+            try{
+                const resp = await fetch(`${API_BASE}/api/sessions`, { headers: authHeaders() });
+                if(resp.ok){ const d = await resp.json(); sessions = d.sessions || []; }
+            }catch{}
             const tbody = document.getElementById('sessionsTableBody');
             if (sessions.length === 0) {
                 tbody.innerHTML = `<tr><td colspan="5" class="no-data"><i class=\"fas fa-inbox\"></i> No active sessions.</td></tr>`;
@@ -444,11 +452,11 @@
                 tbody.innerHTML = sessions.map(s => `
                     <tr>
                         <td>${new Date(s.createdAt).toLocaleString()}</td>
-                        <td>${new Date(s.lastActiveAt).toLocaleString()}</td>
+                        <td>${new Date(s.lastActive).toLocaleString()}</td>
                         <td>${(s.userAgent || '').substring(0, 40)}...</td>
                         <td>${s.ipAddress || 'Unknown'}</td>
                         <td style="display:flex; gap:0.5rem;">
-                            ${s.isCurrent ? '<span class="status-badge success">Current</span>' : ''}
+                            ${s.id === currentId ? '<span class="status-badge success">Current</span>' : ''}
                             <button class="secondary-btn small" onclick="revokeSession(\'${s.id}\')"><i class=\"fas fa-sign-out-alt\"></i> Revoke</button>
                         </td>
                     </tr>
@@ -457,21 +465,10 @@
             document.getElementById('sessionsModal').style.display = 'block';
         }
         function closeSessionsModal() { document.getElementById('sessionsModal').style.display = 'none'; }
-        function revokeSession(sessionId) {
-            const username = getUsername();
+        async function revokeSession(sessionId) {
             const currentSessionId = localStorage.getItem('currentSessionId');
-            let sessions = getSessions(username);
-            const target = sessions.find(s => s.id === sessionId);
-            if (!target) return;
-            if (sessionId === currentSessionId) {
-                // Revoke current session = logout
-                alert('Revoking current session will log you out.');
-                logout();
-                return;
-            }
-            sessions = sessions.filter(s => s.id !== sessionId);
-            setSessions(username, sessions);
-            viewSessions();
+            if (sessionId === currentSessionId) { alert('Revoking current session will log you out.'); logout(); return; }
+            try{ await fetch(`${API_BASE}/api/sessions/${sessionId}`, { method:'DELETE', headers: authHeaders() }); viewSessions(); } catch {}
         }
 
         // Logout function

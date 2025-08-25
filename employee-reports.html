@@ -51,6 +51,8 @@
   <footer><p>&copy; 2025 PayrollPro by Aaron | Employee Portal</p></footer>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script>
+    const API_BASE = 'http://localhost:4000';
+    function getToken(){ return localStorage.getItem('authToken'); }
     function bindReportDownloads(){
       const table = document.getElementById('reportsTable');
       if(!table) return;
@@ -62,12 +64,22 @@
           const dateStr = row.cells[0].textContent.trim();
           const type = row.cells[1].textContent.trim();
           const period = row.cells[2].textContent.trim();
-          generateReportPDF(type, dateStr, period);
+          downloadReportFromAPI(type, dateStr, period).catch(()=> generateReportPDF(type, dateStr, period));
         });
       });
     }
     function money(n){ return `$${Number(n).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2})}`; }
     function sanitizeForFilename(s){ return s.replace(/[^a-z0-9_-]+/gi,'_'); }
+    async function downloadReportFromAPI(type, dateStr, period){
+      const id = `r_${sanitizeForFilename(type)}_${sanitizeForFilename(period||dateStr)}`;
+      const resp = await fetch(`${API_BASE}/api/reports/${id}/pdf`, { headers: { 'Authorization': `Bearer ${getToken()}` } });
+      if(!resp.ok) throw new Error('api');
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `Payroll_${sanitizeForFilename(type)}_${sanitizeForFilename(period||dateStr)}.pdf`;
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    }
     function generateReportPDF(type, dateStr, period){
       const lib = window.jspdf;
       if(!lib || !lib.jsPDF){ alert('PDF library not loaded. Check your network.'); return; }

@@ -1,0 +1,53 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Prisma schema for PayrollPro demo backend (SQLite)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(cuid())
+  username      String   @unique
+  email         String   @unique
+  passwordHash  String
+  role          String   @default("employee")
+  fullName      String
+  phone         String?
+  department    String?
+  employeeId    String   @unique
+  lastLoginAt   DateTime?
+  // 2FA
+  twoFAEnabled  Boolean  @default(false)
+  twoFASecret   String?
+  recoveryCodes RecoveryCode[]
+  // relations
+  sessions      Session[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Session {
+  id          String   @id @default(cuid())
+  user        User     @relation(fields: [userId], references: [id])
+  userId      String
+  userAgent   String?
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+  lastActive  DateTime @default(now())
+}
+
+model RecoveryCode {
+  id        String   @id @default(cuid())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  code      String   @unique
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+}
