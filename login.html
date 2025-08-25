@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="./common.js"></script>
+</head>
+<body>
+    <div class="auth-container">
+        <div class="auth-card">
+            <h1><i class="fas fa-user-lock"></i> Sign In</h1>
+            <form id="loginForm">
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" required />
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" required />
+                </div>
+                <div class="form-group">
+                    <label for="role">Role</label>
+                    <select id="role">
+                        <option value="employee">Employee</option>
+                        <option value="admin">Admin</option>
+                    </select>
+                </div>
+                <button type="submit" class="primary-btn"><i class="fas fa-sign-in-alt"></i> Login</button>
+            </form>
+            <div class="restricted-box" style="margin-top: 14px;">
+                <i class="fas fa-circle-info"></i>
+                <div>
+                    <strong>About this demo</strong>
+                    <p style="margin: 6px 0 8px 0;">This payroll portal includes role-based access and login activity tracking.</p>
+                    <ul style="margin: 0 0 0 18px;">
+                        <li>Use password <em>password</em> to sign in (demo).</li>
+                        <li>Choose <em>Admin</em> to view organization-wide login events.</li>
+                        <li>Choose <em>Employee</em> to manage your profile and security.</li>
+                        <li>See <em>Capabilities</em> for the full feature overview.</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+        function generateToken() {
+            return Math.random().toString(36).slice(2) + Date.now().toString(36);
+        }
+
+        document.getElementById('loginForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value;
+            const role = document.getElementById('role').value;
+
+            // Demo auth: accept any username, password must be 'password'
+            if (!username || !password) {
+                alert('Please enter username and password');
+                return;
+            }
+
+            if (password !== 'password') {
+                if (window.recordLoginEvent) {
+                    window.recordLoginEvent('Failed', { username, role });
+                }
+                alert('Invalid credentials (demo requires password = "password")');
+                return;
+            }
+
+            // Success: store session
+            localStorage.setItem('authToken', generateToken());
+            localStorage.setItem('userRole', role);
+            localStorage.setItem('username', username);
+
+            try {
+                if (window.recordLoginEvent) {
+                    await window.recordLoginEvent('Success', { username, role });
+                }
+            } catch (_) {}
+
+            // Navigate
+            if (role === 'admin') {
+                window.location.href = 'admin-login-history.html';
+            } else {
+                window.location.href = 'employee-profile.html';
+            }
+        });
+    </script>
+</body>
+</html>
+

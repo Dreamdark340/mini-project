@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - Login Events</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="./common.js"></script>
+</head>
+<body>
+    <header class="header">
+        <div class="header-content">
+            <h1><i class="fas fa-shield-alt"></i> Admin Console</h1>
+            <div class="user-info">
+                <span id="currentUser">Loading...</span>
+                <button onclick="openHelp()" class="secondary-btn"><i class="fas fa-circle-question"></i> Help</button>
+                <button onclick="logout()" class="logout-btn">
+                    <i class="fas fa-sign-out-alt"></i> Logout
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+        <nav class="sidebar">
+            <div class="sidebar-header">
+                <i class="fas fa-user-shield"></i>
+                <span>Admin Portal</span>
+            </div>
+            <ul class="nav-links">
+                <li class="active">
+                    <a href="admin-login-history.html">
+                        <i class="fas fa-history"></i>
+                        <span>Login Events</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="capabilities.html">
+                        <i class="fas fa-layer-group"></i>
+                        <span>Capabilities</span>
+                    </a>
+                </li>
+            </ul>
+        </nav>
+
+        <main class="main-content">
+            <div class="page-header">
+                <h2><i class="fas fa-history"></i> Login Events</h2>
+                <p>View login activity across all users. Details include IP, browser and location.</p>
+            </div>
+
+            <div class="content-section">
+                <div class="section-header">
+                    <h3><i class="fas fa-database"></i> Events</h3>
+                    <div class="actions">
+                        <input type="text" id="filterInput" placeholder="Filter by username, IP, location" oninput="renderEvents()" />
+                        <button class="secondary-btn" onclick="refreshEvents()"><i class="fas fa-sync"></i> Refresh</button>
+                        <button class="secondary-btn" onclick="exportCsv()"><i class="fas fa-file-csv"></i> Export CSV</button>
+                        <button class="secondary-btn" onclick="clearAll()"><i class="fas fa-trash"></i> Clear All</button>
+                    </div>
+                </div>
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Username</th>
+                                <th>Role</th>
+                                <th>IP Address</th>
+                                <th>Browser</th>
+                                <th>Status</th>
+                                <th>Location</th>
+                            </tr>
+                        </thead>
+                        <tbody id="eventsTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <footer>
+        <p>&copy; 2025 PayrollPro by Aaron | Admin Portal</p>
+    </footer>
+
+    <!-- Help Modal -->
+    <div id="helpModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-circle-info"></i> What this page does</h3>
+                <span class="close" onclick="closeHelp()">&times;</span>
+            </div>
+            <div style="padding: 14px 16px; display: grid; gap: 10px;">
+                <div class="profile-field">
+                    <strong>Login Events</strong>
+                    <ul>
+                        <li>Shows login time, username, role, IP, browser, status, and location.</li>
+                        <li>Use the filter box to search by username, IP, or location.</li>
+                        <li>Export results as CSV or clear all stored events.</li>
+                        <li>Only admins can access this page.</li>
+                    </ul>
+                </div>
+                <div class="profile-field">
+                    <strong>Notes</strong>
+                    <ul>
+                        <li>IP and location are fetched via public services for demo purposes.</li>
+                        <li>Events are stored in localStorage in this demo.</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function checkAdminAuth() {
+            const token = localStorage.getItem('authToken');
+            const userRole = localStorage.getItem('userRole');
+            const username = localStorage.getItem('username');
+            if (!token || !userRole || !username) {
+                window.location.href = 'login.html';
+                return false;
+            }
+            if (userRole !== 'admin') {
+                alert('Access denied. Admin privileges required.');
+                window.location.href = 'login.html';
+                return false;
+            }
+            document.getElementById('currentUser').innerHTML = `
+                <span>${username}</span>
+                <span class="role-badge">Admin</span>
+            `;
+            return true;
+        }
+
+        function loadAndMigrate() {
+            try {
+                if (window.migrateLegacyLoginHistory) {
+                    window.migrateLegacyLoginHistory();
+                }
+            } catch (_) {}
+        }
+
+        function getFilteredEvents() {
+            const q = (document.getElementById('filterInput').value || '').toLowerCase();
+            const events = (window.getAllLoginEvents ? window.getAllLoginEvents() : []).filter((e) => {
+                return (
+                    (e.username || '').toLowerCase().includes(q) ||
+                    (e.ipAddress || '').toLowerCase().includes(q) ||
+                    (e.location || '').toLowerCase().includes(q)
+                );
+            });
+            return events;
+        }
+
+        function renderEvents() {
+            const tbody = document.getElementById('eventsTableBody');
+            const events = getFilteredEvents();
+            if (!events.length) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="7" class="no-data">
+                            <i class="fas fa-inbox"></i>
+                            <p>No login events found.</p>
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+            tbody.innerHTML = events.map((e) => `
+                <tr>
+                    <td>${new Date(e.timestamp).toLocaleString()}</td>
+                    <td>${e.username}</td>
+                    <td>${e.role}</td>
+                    <td>${e.ipAddress}</td>
+                    <td>${(e.browser || '').substring(0, 60)}...</td>
+                    <td><span class="status-badge ${e.status === 'Success' ? 'success' : 'danger'}">${e.status}</span></td>
+                    <td>${e.location}</td>
+                </tr>
+            `).join('');
+        }
+
+        function refreshEvents() {
+            renderEvents();
+        }
+
+        function clearAll() {
+            if (!confirm('This will permanently remove all stored login events. Continue?')) return;
+            localStorage.removeItem('loginEvents');
+            renderEvents();
+        }
+
+        function exportCsv() {
+            const events = getFilteredEvents();
+            const headers = ['timestamp','username','role','ipAddress','browser','status','location'];
+            const rows = events.map(e => [e.timestamp, e.username, e.role, e.ipAddress, (e.browser||'').replace(/\n/g,' '), e.status, e.location]);
+            const csv = [headers.join(','), ...rows.map(r => r.map(v => `"${String(v||'').replace(/"/g,'""')}"`).join(','))].join('\n');
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'login-events.csv';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        function openHelp() { document.getElementById('helpModal').style.display = 'block'; }
+        function closeHelp() { document.getElementById('helpModal').style.display = 'none'; }
+
+        function logout() {
+            localStorage.removeItem('authToken');
+            localStorage.removeItem('userRole');
+            localStorage.removeItem('username');
+            window.location.href = 'login.html';
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            if (!checkAdminAuth()) return;
+            loadAndMigrate();
+            renderEvents();
+        });
+
+        window.onclick = function(event) {
+            const helpModal = document.getElementById('helpModal');
+            if (event.target === helpModal) closeHelp();
+        }
+    </script>
+</body>
+<\/html>
+
