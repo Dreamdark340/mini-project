@@ -505,7 +505,7 @@ app.post('/api/trader/import/csv', authMiddleware, requireRole('trader', 'admin'
 
 app.get('/api/trader/report.pdf', authMiddleware, requireRole('trader', 'admin'), async (_req, res) => {
   const reqAny = _req as any;
-  const { start, end, brand } = _req.query as { start?: string; end?: string; brand?: string };
+  const { start, end, brand, logo } = _req.query as { start?: string; end?: string; brand?: string; logo?: string };
   const range: any = {};
   if (start) range.gte = new Date(start);
   if (end) range.lte = new Date(end);
@@ -534,6 +534,7 @@ app.get('/api/trader/report.pdf', authMiddleware, requireRole('trader', 'admin')
   const estTax = Math.round(realizedGains * 0.15);
   const html = renderReportHtml({
     brand: brand || 'PayrollPro',
+    logoUrl: logo || '',
     dateRange: { start: start || '', end: end || '' },
     rows,
     totals: { value: totals.value },
@@ -549,12 +550,12 @@ app.get('/api/trader/report.pdf', authMiddleware, requireRole('trader', 'admin')
     format: 'A4', printBackground: true,
     margin: { top: '20mm', bottom: '20mm', left: '12mm', right: '12mm' },
     displayHeaderFooter: true,
-    headerTemplate: `<div style="font-size:10px; width:100%; padding:0 12mm; display:flex; justify-content:space-between; font-family: Arial; color:#888;">
+    headerTemplate: `<div style="font-size:10px; width:100%; padding:0 12mm; display:flex; justify-content:space-between; align-items:center; font-family: Arial; color:#888;">
       <span>${(brand || 'PayrollPro')}</span>
       <span>Crypto Tax Report</span>
     </div>`,
-    footerTemplate: `<div style="font-size:10px; width:100%; padding:0 12mm; display:flex; justify-content:space-between; font-family: Arial; color:#888;">
-      <span class="date"></span>
+    footerTemplate: `<div style="font-size:10px; width:100%; padding:0 12mm; display:flex; justify-content:space-between; align-items:center; font-family: Arial; color:#888;">
+      <span>${(brand || 'PayrollPro')}</span>
       <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
     </div>`
   });
@@ -566,6 +567,7 @@ app.get('/api/trader/report.pdf', authMiddleware, requireRole('trader', 'admin')
 
 function renderReportHtml(data: {
   brand: string;
+  logoUrl: string;
   dateRange: { start: string; end: string };
   rows: { date: string; symbol: string; type: string; amount: number; price: number; value: number }[];
   totals: { value: number };
@@ -611,12 +613,19 @@ function renderReportHtml(data: {
       .card .value { font-weight: 700; font-size: 14px; }
       .watermark { position: fixed; top: 40%; left: 50%; transform: translate(-50%, -50%) rotate(-25deg); font-size: 72px; color: rgba(0,0,0,0.05); z-index: 0; pointer-events: none; }
       .section { position: relative; z-index: 1; }
+      .brand-row { display:flex; gap: 10px; align-items:center; margin-bottom: 6px; }
+      .brand-row img { height: 28px; }
+      .sig-grid { display:grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 10px; }
+      .sig-box { border-top: 1px solid #333; padding-top: 6px; font-size: 12px; color:#333; }
     </style>
   </head>
   <body>
     <div class="watermark">${data.brand}</div>
     <div class="section">
-      <h1>${data.brand} — Crypto Tax Report</h1>
+      <div class="brand-row">
+        ${data.logoUrl ? `<img src="${data.logoUrl}" alt="${data.brand} logo"/>` : ''}
+        <h1>${data.brand} — Crypto Tax Report</h1>
+      </div>
       <div class="muted">Range: ${rangeText}</div>
       <div class="grid" style="margin-top:8px;">
         <div class="card"><div class="label">Approx. Portfolio Value</div><div class="value">$${data.totals.value.toLocaleString()}</div></div>
@@ -655,7 +664,17 @@ function renderReportHtml(data: {
       </table>
     </div>
     <div class="section" style="margin-top:8px;">
-      <div class="muted">This report is informational and not tax advice.</div>
+      <h2>Disclaimers</h2>
+      <div class="muted">
+        <div>- This report is informational and not tax advice.</div>
+        <div>- Data may contain inaccuracies based on exchange exports and mapping.</div>
+        <div>- Consult a qualified tax professional before filing.</div>
+      </div>
+      <h2 style="margin-top:10px;">Signatures</h2>
+      <div class="sig-grid">
+        <div class="sig-box">Prepared by (Name, Title, Date)</div>
+        <div class="sig-box">Approved by (Name, Title, Date)</div>
+      </div>
     </div>
   </body>
   </html>`;
