@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Reports - Payroll Management</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <script>
+    function logout(){ localStorage.removeItem('authToken'); localStorage.removeItem('userRole'); localStorage.removeItem('username'); window.location.href='login.html'; }
+    function checkAuth(){ const t=localStorage.getItem('authToken'); const r=localStorage.getItem('userRole'); const u=localStorage.getItem('username'); if(!t||!r||!u){ window.location.href='login.html'; return; } if(r!=='employee'){ window.location.href='login.html'; return; } document.getElementById('currentUser').innerHTML=`<span>${u}</span><span class="role-badge">Employee</span>`; document.body.classList.add('employee-theme'); }
+    document.addEventListener('DOMContentLoaded', checkAuth);
+  </script>
+</head>
+<body>
+  <header class="header">
+    <div class="header-content">
+      <h1><i class="fas fa-chart-line"></i> Payroll Management</h1>
+      <div class="user-info">
+        <span id="currentUser">Loading...</span>
+        <button onclick="logout()" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</button>
+      </div>
+    </div>
+  </header>
+  <div class="container">
+    <nav class="sidebar">
+      <div class="sidebar-header"><i class="fas fa-user-tie"></i><span>Employee Portal</span></div>
+      <ul class="nav-links">
+        <li><a href="employee-dashboard.html"><i class="fas fa-tachometer-alt"></i><span>Dashboard</span></a></li>
+        <li class="active"><a href="employee-reports.html"><i class="fas fa-file-alt"></i><span>My Reports</span></a></li>
+        <li><a href="employee-profile.html"><i class="fas fa-user-cog"></i><span>Profile</span></a></li>
+      </ul>
+    </nav>
+    <main class="main-content">
+      <div class="page-header"><h2><i class="fas fa-file-alt"></i> My Reports</h2><p>View and download your payroll reports.</p></div>
+      <div class="content-section">
+        <div class="section-header"><h3><i class="fas fa-folder-open"></i> Available Reports</h3></div>
+        <div class="table-container">
+          <table id="reportsTable" class="data-table">
+            <thead><tr><th>Date</th><th>Type</th><th>Period</th><th>Actions</th></tr></thead>
+            <tbody>
+              <tr><td>Mar 15, 2025</td><td>Payslip</td><td>Mar 1 - Mar 15</td><td><button class="secondary-btn small"><i class="fas fa-download"></i> Download</button></td></tr>
+              <tr><td>Feb 28, 2025</td><td>Payslip</td><td>Feb 16 - Feb 28</td><td><button class="secondary-btn small"><i class="fas fa-download"></i> Download</button></td></tr>
+              <tr><td>2024</td><td>Year-end Tax</td><td>2024</td><td><button class="secondary-btn small"><i class="fas fa-download"></i> Download</button></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+  <footer><p>&copy; 2025 PayrollPro by Aaron | Employee Portal</p></footer>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script>
+    const API_BASE = 'http://localhost:4000';
+    function getToken(){ return localStorage.getItem('authToken'); }
+    function bindReportDownloads(){
+      const table = document.getElementById('reportsTable');
+      if(!table) return;
+      const rows = table.querySelectorAll('tbody tr');
+      rows.forEach(row => {
+        const btn = row.querySelector('button');
+        if(!btn) return;
+        btn.addEventListener('click', () => {
+          const dateStr = row.cells[0].textContent.trim();
+          const type = row.cells[1].textContent.trim();
+          const period = row.cells[2].textContent.trim();
+          downloadReportFromAPI(type, dateStr, period).catch(()=> generateReportPDF(type, dateStr, period));
+        });
+      });
+    }
+    function money(n){ return `$${Number(n).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2})}`; }
+    function sanitizeForFilename(s){ return s.replace(/[^a-z0-9_-]+/gi,'_'); }
+    async function downloadReportFromAPI(type, dateStr, period){
+      const id = `r_${sanitizeForFilename(type)}_${sanitizeForFilename(period||dateStr)}`;
+      const resp = await fetch(`${API_BASE}/api/reports/${id}/pdf`, { headers: { 'Authorization': `Bearer ${getToken()}` } });
+      if(!resp.ok) throw new Error('api');
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `Payroll_${sanitizeForFilename(type)}_${sanitizeForFilename(period||dateStr)}.pdf`;
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    }
+    function generateReportPDF(type, dateStr, period){
+      const lib = window.jspdf;
+      if(!lib || !lib.jsPDF){ alert('PDF library not loaded. Check your network.'); return; }
+      const { jsPDF } = lib;
+      const doc = new jsPDF();
+      const username = localStorage.getItem('username') || 'Employee';
+      let y = 18;
+      doc.setFontSize(18); doc.text('PayrollPro', 14, y); y += 4; doc.setFontSize(11); doc.setTextColor(100);
+      doc.text('Employee Payroll Report', 14, y); doc.setTextColor(0); y += 10;
+      doc.setFontSize(12);
+      doc.text(`Report: ${type}`, 14, y); y += 6;
+      doc.text(`Employee: ${username}`, 14, y); y += 6;
+      doc.text(`Date: ${dateStr}`, 14, y); y += 6;
+      doc.text(`Period: ${period}`, 14, y); y += 8;
+      doc.setDrawColor(180); doc.line(14, y, 196, y); y += 8;
+      // Simple summary depending on type
+      if(type.toLowerCase().includes('payslip')){
+        const gross = 2500.00;
+        const taxes = 500.00;
+        const deductions = 120.00;
+        const net = gross - taxes - deductions;
+        doc.setFontSize(13); doc.text('Summary', 14, y); y += 8; doc.setFontSize(12);
+        doc.text(`Gross Pay: ${money(gross)}`, 14, y); y += 6;
+        doc.text(`Taxes: ${money(taxes)}`, 14, y); y += 6;
+        doc.text(`Deductions: ${money(deductions)}`, 14, y); y += 6;
+        doc.text(`Net Pay: ${money(net)}`, 14, y); y += 10;
+        doc.setTextColor(100); doc.setFontSize(10);
+        doc.text('Note: Demo values for preview purposes only.', 14, y);
+      } else {
+        doc.setFontSize(13); doc.text('Year-end Summary', 14, y); y += 8; doc.setFontSize(12);
+        doc.text('Total Gross Income: $48,000.00', 14, y); y += 6;
+        doc.text('Total Tax Withheld: $9,600.00', 14, y); y += 6;
+        doc.text('Filing Status: Single (Demo)', 14, y); y += 10;
+        doc.setTextColor(100); doc.setFontSize(10);
+        doc.text('Note: Demo values for preview purposes only.', 14, y);
+      }
+      const file = `Payroll_${sanitizeForFilename(type)}_${sanitizeForFilename(period||dateStr)}.pdf`;
+      doc.save(file);
+    }
+    document.addEventListener('DOMContentLoaded', bindReportDownloads);
+  </script>
+</body>
+</html>
+

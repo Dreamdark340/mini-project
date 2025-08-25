@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Employee Dashboard - Payroll Management</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <script>
+    function logout(){ localStorage.removeItem('authToken'); localStorage.removeItem('userRole'); localStorage.removeItem('username'); window.location.href='login.html'; }
+    function checkAuth(){ const t=localStorage.getItem('authToken'); const r=localStorage.getItem('userRole'); const u=localStorage.getItem('username'); if(!t||!r||!u){ window.location.href='login.html'; return; } if(r!=='employee'){ window.location.href='login.html'; return; } document.getElementById('currentUser').innerHTML=`<span>${u}</span><span class="role-badge">Employee</span>`; document.body.classList.add('employee-theme'); }
+    document.addEventListener('DOMContentLoaded', checkAuth);
+  </script>
+  <style> .cards{ display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap:14px; } @media(max-width:900px){ .cards{ grid-template-columns: 1fr; } } .stat{ background: var(--card); border:1px solid var(--border); border-radius: var(--radius); padding:16px; box-shadow: var(--shadow); } .stat h4{ margin:0 0 6px; } .stat .num{ font-size: 1.6rem; font-weight: 800; } </style>
+</head>
+<body>
+  <header class="header">
+    <div class="header-content">
+      <h1><i class="fas fa-chart-line"></i> Payroll Management</h1>
+      <div class="user-info">
+        <span id="currentUser">Loading...</span>
+        <button onclick="logout()" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</button>
+      </div>
+    </div>
+  </header>
+  <div class="container">
+    <nav class="sidebar">
+      <div class="sidebar-header"><i class="fas fa-user-tie"></i><span>Employee Portal</span></div>
+      <ul class="nav-links">
+        <li class="active"><a href="employee-dashboard.html"><i class="fas fa-tachometer-alt"></i><span>Dashboard</span></a></li>
+        <li><a href="employee-reports.html"><i class="fas fa-file-alt"></i><span>My Reports</span></a></li>
+        <li><a href="employee-profile.html"><i class="fas fa-user-cog"></i><span>Profile</span></a></li>
+      </ul>
+    </nav>
+    <main class="main-content">
+      <div class="page-header"><h2><i class="fas fa-tachometer-alt"></i> Dashboard</h2><p>Quick overview of your payroll activity.</p></div>
+      <div class="cards">
+        <div class="stat"><h4>Next Payday</h4><div class="num">Mar 31, 2025</div><div class="muted">In 7 days</div></div>
+        <div class="stat"><h4>YTD Earnings</h4><div class="num">$38,420</div><div class="muted">Gross earnings</div></div>
+        <div class="stat"><h4>Pending Reports</h4><div class="num">2</div><div class="muted">Awaiting approval</div></div>
+      </div>
+      <div class="content-section" style="margin-top:14px;">
+        <div class="section-header"><h3><i class="fas fa-bell"></i> Recent Activity</h3></div>
+        <div class="table-container">
+          <table class="data-table"><thead><tr><th>Date</th><th>Action</th><th>Status</th></tr></thead><tbody>
+            <tr><td>Mar 21, 2025</td><td>Logged in</td><td><span class="status-badge success">Success</span></td></tr>
+            <tr><td>Mar 20, 2025</td><td>Viewed payslip</td><td><span class="status-badge success">OK</span></td></tr>
+          </tbody></table>
+        </div>
+      </div>
+    </main>
+  </div>
+  <footer><p>&copy; 2025 PayrollPro by Aaron | Employee Portal</p></footer>
+</body>
+</html>
+
