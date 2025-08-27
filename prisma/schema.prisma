@@ -75,6 +75,9 @@ model WalletTransaction {
   symbol        String
   amount        Float
   priceUsdCents Int?
+  feeAsset      String?
+  feeAmount     Float?
+  feeUsdCents   Int?
   type          String   // trade | staking | airdrop | mining
   timestamp     DateTime
   sourceEnc     String?  // encrypted metadata JSON

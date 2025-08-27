@@ -56,7 +56,7 @@ function safeDecrypt(b64?: string | null): string | undefined {
   try { return b64 ? JSON.parse(decryptString(b64)).source ?? 'enc' : undefined; } catch { return undefined; }
 }
 
-function detectFormat(lowerHeaders: string[]): { symbol: string; symbolKind?: 'market'|'asset'|'symbol'; type: string; amount: string; price?: string; timestamp: string } | null {
+function detectFormat(lowerHeaders: string[]): { symbol: string; symbolKind?: 'market'|'asset'|'symbol'; type: string; amount: string; price?: string; timestamp: string; feeAsset?: string; feeAmount?: string } | null {
   // Supported schemas (lower-cased header names):
   // 1) generic: symbol,type,amount,price,timestamp
   // 2) binance-like: date, market (BTCUSDT), type, price, amount
@@ -64,28 +64,28 @@ function detectFormat(lowerHeaders: string[]): { symbol: string; symbolKind?: 'm
   const h = (name: string) => lowerHeaders.indexOf(name);
   // Generic
   if (h('symbol')>=0 && h('type')>=0 && h('amount')>=0 && h('timestamp')>=0) {
-    return { symbol: lowerHeaders[h('symbol')], symbolKind: 'symbol', type: lowerHeaders[h('type')], amount: lowerHeaders[h('amount')], price: h('price')>=0? lowerHeaders[h('price')]: undefined, timestamp: lowerHeaders[h('timestamp')] };
+    return { symbol: lowerHeaders[h('symbol')], symbolKind: 'symbol', type: lowerHeaders[h('type')], amount: lowerHeaders[h('amount')], price: h('price')>=0? lowerHeaders[h('price')]: undefined, timestamp: lowerHeaders[h('timestamp')], feeAsset: h('fee asset')>=0? lowerHeaders[h('fee asset')]: (h('fee asset/ccy')>=0? lowerHeaders[h('fee asset/ccy')]: (h('fee asset currency')>=0? lowerHeaders[h('fee asset currency')]: undefined)), feeAmount: h('fee')>=0? lowerHeaders[h('fee')]: (h('fee amount')>=0? lowerHeaders[h('fee amount')]: undefined) };
   }
   // Binance-like
   if (h('date')>=0 && h('market')>=0 && h('type')>=0 && h('price')>=0 && h('amount')>=0) {
-    return { symbol: lowerHeaders[h('market')], symbolKind: 'market', type: lowerHeaders[h('type')], amount: lowerHeaders[h('amount')], price: lowerHeaders[h('price')], timestamp: lowerHeaders[h('date')] };
+    return { symbol: lowerHeaders[h('market')], symbolKind: 'market', type: lowerHeaders[h('type')], amount: lowerHeaders[h('amount')], price: lowerHeaders[h('price')], timestamp: lowerHeaders[h('date')], feeAsset: h('fee asset')>=0? lowerHeaders[h('fee asset')]: undefined, feeAmount: h('fee')>=0? lowerHeaders[h('fee')]: undefined };
   }
   // Coinbase-like
   if (h('timestamp')>=0 && h('transaction type')>=0 && h('asset')>=0 && h('quantity transacted')>=0 && h('spot price at transaction')>=0) {
-    return { symbol: lowerHeaders[h('asset')], symbolKind: 'asset', type: lowerHeaders[h('transaction type')], amount: lowerHeaders[h('quantity transacted')], price: lowerHeaders[h('spot price at transaction')], timestamp: lowerHeaders[h('timestamp')] };
+    return { symbol: lowerHeaders[h('asset')], symbolKind: 'asset', type: lowerHeaders[h('transaction type')], amount: lowerHeaders[h('quantity transacted')], price: lowerHeaders[h('spot price at transaction')], timestamp: lowerHeaders[h('timestamp')], feeAsset: h('fee asset')>=0? lowerHeaders[h('fee asset')]: undefined, feeAmount: h('fee')>=0? lowerHeaders[h('fee')]: undefined };
   }
   // Bybit-like: time, symbol, side, price, qty
   if (h('time')>=0 && h('symbol')>=0 && (h('side')>=0 || h('type')>=0) && (h('qty')>=0 || h('quantity')>=0) && h('price')>=0) {
     const qtyKey = h('qty')>=0 ? lowerHeaders[h('qty')] : lowerHeaders[h('quantity')];
     const typeKey = h('side')>=0 ? lowerHeaders[h('side')] : lowerHeaders[h('type')];
-    return { symbol: lowerHeaders[h('symbol')], symbolKind: 'symbol', type: typeKey, amount: qtyKey, price: lowerHeaders[h('price')], timestamp: lowerHeaders[h('time')] };
+    return { symbol: lowerHeaders[h('symbol')], symbolKind: 'symbol', type: typeKey, amount: qtyKey, price: lowerHeaders[h('price')], timestamp: lowerHeaders[h('time')], feeAsset: h('fee asset')>=0? lowerHeaders[h('fee asset')]: undefined, feeAmount: h('fee')>=0? lowerHeaders[h('fee')]: undefined };
   }
   // Kraken-like: time, type, asset pair, price, vol
   if (h('time')>=0 && (h('type')>=0 || h('side')>=0) && (h('asset pair')>=0 || h('pair')>=0) && (h('vol')>=0 || h('volume')>=0) && h('price')>=0) {
     const pairKey = h('asset pair')>=0 ? lowerHeaders[h('asset pair')] : lowerHeaders[h('pair')];
     const volKey = h('vol')>=0 ? lowerHeaders[h('vol')] : lowerHeaders[h('volume')];
     const typeKey = h('type')>=0 ? lowerHeaders[h('type')] : lowerHeaders[h('side')];
-    return { symbol: pairKey, symbolKind: 'market', type: typeKey, amount: volKey, price: lowerHeaders[h('price')], timestamp: lowerHeaders[h('time')] };
+    return { symbol: pairKey, symbolKind: 'market', type: typeKey, amount: volKey, price: lowerHeaders[h('price')], timestamp: lowerHeaders[h('time')], feeAsset: h('fee asset')>=0? lowerHeaders[h('fee asset')]: undefined, feeAmount: h('fee')>=0? lowerHeaders[h('fee')]: undefined };
   }
   return null;
 }
@@ -113,6 +113,24 @@ function extractBaseFromMarket(market: string): string {
 
 function normalizeAsset(asset: string): string {
   return asset.replace(/[^A-Za-z0-9]/g, '');
+}
+
+function computeFeeUsd(args: { feeAsset?: string; feeAmount?: number; rowPrice?: number; symbol: string }): number | undefined {
+  const { feeAsset, feeAmount, rowPrice, symbol } = args;
+  if (!feeAmount || feeAmount <= 0) return undefined;
+  // If fee asset equals trade symbol, value by row unit price
+  if (feeAsset && feeAsset === symbol && rowPrice && Number.isFinite(rowPrice)) return feeAmount * rowPrice;
+  // If fee in USD-stable
+  if (feeAsset && /^(USD|USDT|USDC)$/i.test(feeAsset)) return feeAmount * 1;
+  // Fallback: use stub historical price
+  const stub = getHistoricalUsdPrice(feeAsset || 'BTC', Date.now());
+  return feeAmount * stub;
+}
+
+function getHistoricalUsdPrice(_symbol: string, _ts: number): number {
+  // TODO: integrate with CoinGecko; stub values for now
+  const map: Record<string, number> = { BTC: 65000, ETH: 3200, USDT: 1, USDC: 1 };
+  return map[_symbol.toUpperCase()] || 1;
 }
 
 function signToken(userId: string) {
@@ -463,8 +481,8 @@ app.post('/api/trader/import/csv', authMiddleware, requireRole('trader', 'admin'
   if (!mapping) return res.status(400).json({ error: 'Unsupported CSV format' });
   // Validate and transform rows
   const rowErrors: { row: number; message: string }[] = [];
-  const preview: { row: number; symbol: string; amount: number; price?: number; type: string; timestamp: string }[] = [];
-  const toPersist: { symbol: string; amount: number; priceUsdCents?: number; type: string; timestamp: Date; sourceEnc?: string }[] = [];
+  const preview: { row: number; symbol: string; amount: number; price?: number; type: string; timestamp: string; feeAsset?: string; feeAmount?: number; feeUsd?: number }[] = [];
+  const toPersist: { symbol: string; amount: number; priceUsdCents?: number; type: string; timestamp: Date; sourceEnc?: string; feeAsset?: string; feeAmount?: number; feeUsdCents?: number }[] = [];
   for (let i=0; i<records.length; i++) {
     const r = records[i];
     const rowNum = i + 2; // +1 header, +1 1-indexed
@@ -477,6 +495,8 @@ app.post('/api/trader/import/csv', authMiddleware, requireRole('trader', 'admin'
     const type = normalizeType(rawType);
     let amount = parseFloat(String(r[mapping.amount] ?? ''));
     const price = mapping.price ? parseFloat(String(r[mapping.price] ?? '')) : undefined;
+    const feeAsset = mapping.feeAsset ? String(r[mapping.feeAsset] ?? '').toUpperCase() : undefined;
+    const feeAmount = mapping.feeAmount ? parseFloat(String(r[mapping.feeAmount] ?? '')) : undefined;
     const timeRaw = String(r[mapping.timestamp] ?? '');
     const timestamp = new Date(timeRaw);
     const errors: string[] = [];
@@ -493,8 +513,9 @@ app.post('/api/trader/import/csv', authMiddleware, requireRole('trader', 'admin'
       const isSell = /sell|withdraw|redeem/i.test(rawType);
       amount = isSell ? -Math.abs(amount) : Math.abs(amount);
     }
-    preview.push({ row: rowNum, symbol, amount, price, type, timestamp: timestamp.toISOString() });
-    toPersist.push({ symbol, amount, priceUsdCents: price !== undefined ? Math.round((price as number) * 100) : undefined, type, timestamp, sourceEnc: encryptString(JSON.stringify({ source: 'CSV' })) });
+    const feeUsd = computeFeeUsd({ feeAsset, feeAmount, rowPrice: price, symbol });
+    preview.push({ row: rowNum, symbol, amount, price, type, timestamp: timestamp.toISOString(), feeAsset, feeAmount, feeUsd });
+    toPersist.push({ symbol, amount, priceUsdCents: price !== undefined ? Math.round((price as number) * 100) : undefined, type, timestamp, sourceEnc: encryptString(JSON.stringify({ source: 'CSV' })), feeAsset, feeAmount, feeUsdCents: feeUsd !== undefined ? Math.round(feeUsd * 100) : undefined });
   }
   if (dryRun) {
     return res.json({ ok: true, dryRun: true, rows: preview.slice(0, 200), errors: rowErrors.slice(0, 200), totalValid: preview.length, totalErrors: rowErrors.length });
@@ -503,7 +524,7 @@ app.post('/api/trader/import/csv', authMiddleware, requireRole('trader', 'admin'
     return res.status(400).json({ error: 'No valid rows to import', errors: rowErrors.slice(0, 200) });
   }
   const created = await prisma.$transaction(
-    toPersist.map(t => prisma.walletTransaction.create({ data: { userId: req.userId, symbol: t.symbol, amount: t.amount, priceUsdCents: t.priceUsdCents, type: t.type, timestamp: t.timestamp, sourceEnc: t.sourceEnc } }))
+    toPersist.map(t => prisma.walletTransaction.create({ data: { userId: req.userId, symbol: t.symbol, amount: t.amount, priceUsdCents: t.priceUsdCents, type: t.type, timestamp: t.timestamp, sourceEnc: t.sourceEnc, feeAsset: t.feeAsset, feeAmount: t.feeAmount, feeUsdCents: t.feeUsdCents } }))
   );
   res.json({ ok: true, imported: created.length, errors: rowErrors, totalValid: toPersist.length, totalErrors: rowErrors.length });
 });
@@ -698,7 +719,7 @@ app.get('/api/trader/gains', authMiddleware, requireRole('trader', 'admin'), asy
   const strategy = (typeof _req.query.strategy === 'string' ? _req.query.strategy : 'fifo').toLowerCase();
   const reqAny = _req as any;
   const rows = await prisma.walletTransaction.findMany({ where: { userId: reqAny.userId, type: 'trade' }, orderBy: { timestamp: 'asc' } });
-  const txs = rows.map(r=>({ symbol: r.symbol, amount: r.amount, price: (r.priceUsdCents ?? 0)/100, date: r.timestamp }));
+  const txs = rows.map(r=>({ symbol: r.symbol, amount: r.amount, price: (r.priceUsdCents ?? 0)/100, date: r.timestamp, feeUsd: (r.feeUsdCents ?? 0)/100 || undefined }));
   const result = computeGains(txs, strategy === 'lifo' ? 'lifo' : 'fifo');
   res.json(result.summary);
 });
@@ -707,12 +728,12 @@ app.get('/api/trader/gains/full', authMiddleware, requireRole('trader', 'admin')
   const strategy = (typeof _req.query.strategy === 'string' ? _req.query.strategy : 'fifo').toLowerCase();
   const reqAny = _req as any;
   const rows = await prisma.walletTransaction.findMany({ where: { userId: reqAny.userId, type: 'trade' }, orderBy: { timestamp: 'asc' } });
-  const txs = rows.map(r=>({ symbol: r.symbol, amount: r.amount, price: (r.priceUsdCents ?? 0)/100, date: r.timestamp }));
+  const txs = rows.map(r=>({ symbol: r.symbol, amount: r.amount, price: (r.priceUsdCents ?? 0)/100, date: r.timestamp, feeUsd: (r.feeUsdCents ?? 0)/100 || undefined }));
   const result = computeGains(txs, strategy === 'lifo' ? 'lifo' : 'fifo');
   res.json(result);
 });
 
-type TradeTx = { symbol: string; amount: number; price: number; date: Date };
+type TradeTx = { symbol: string; amount: number; price: number; date: Date; feeUsd?: number };
 type Lot = { remaining: number; price: number; date: Date };
 function computeGinsForSymbol(txs: TradeTx[], method: 'fifo'|'lifo'){
   const buys: Lot[] = [];
@@ -720,10 +741,12 @@ function computeGinsForSymbol(txs: TradeTx[], method: 'fifo'|'lifo'){
   const pick = (arr: Lot[]) => method==='fifo' ? arr.shift()! : arr.pop()!;
   for (const tx of txs) {
     if (tx.amount > 0) {
-      buys.push({ remaining: tx.amount, price: tx.price, date: tx.date });
+      const feePerUnit = tx.feeUsd ? (tx.feeUsd / tx.amount) : 0;
+      buys.push({ remaining: tx.amount, price: tx.price + feePerUnit, date: tx.date });
     } else if (tx.amount < 0) {
       let qtyToSell = -tx.amount;
       let proceeds = qtyToSell * tx.price;
+      if (tx.feeUsd) proceeds -= tx.feeUsd;
       let costSum = 0;
       while (qtyToSell > 0 && buys.length > 0) {
         const lot = pick(buys);
