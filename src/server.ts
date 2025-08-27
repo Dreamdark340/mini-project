@@ -6,6 +6,10 @@ import { PrismaClient } from '@prisma/client';
 import speakeasy from 'speakeasy';
 import { z } from 'zod';
 import rateLimit from 'express-rate-limit';
+import crypto from 'crypto';
+import multer from 'multer';
+import { parse } from 'csv-parse/sync';
+import puppeteer from 'puppeteer';
 
 const prisma = new PrismaClient();
 const app = express();
@@ -15,10 +19,119 @@ app.use(express.json());
 const authLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 50 });
 app.use('/api/auth', authLimiter);
 app.use('/api/2fa', authLimiter);
+const upload = multer({ limits: { fileSize: 10 * 1024 * 1024 } });
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_me';
 
 type JwtPayload = { sub: string };
+
+// In-memory wallet store (per user) as fallback in dev
+type WalletTx = { id: string; userId: string; symbol: string; amount: number; priceUsd?: number; type: 'trade'|'staking'|'airdrop'|'mining'; timestamp: string; source?: string };
+const userIdToWalletTxs: Record<string, WalletTx[]> = Object.create(null);
+
+// Encryption helpers (AES-256-GCM) for sensitive wallet fields
+const ENC_KEY = (process.env.WALLET_ENC_KEY && Buffer.from(process.env.WALLET_ENC_KEY, 'base64').length === 32)
+  ? Buffer.from(process.env.WALLET_ENC_KEY, 'base64')
+  : Buffer.from('00000000000000000000000000000000', 'hex'); // dev-only key
+
+function encryptString(plaintext: string): string {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', ENC_KEY, iv);
+  const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return Buffer.concat([iv, tag, ciphertext]).toString('base64');
+}
+function decryptString(payloadB64: string): string {
+  const buf = Buffer.from(payloadB64, 'base64');
+  const iv = buf.subarray(0, 12);
+  const tag = buf.subarray(12, 28);
+  const ciphertext = buf.subarray(28);
+  const decipher = crypto.createDecipheriv('aes-256-gcm', ENC_KEY, iv);
+  decipher.setAuthTag(tag);
+  const out = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+  return out.toString('utf8');
+}
+
+function safeDecrypt(b64?: string | null): string | undefined {
+  try { return b64 ? JSON.parse(decryptString(b64)).source ?? 'enc' : undefined; } catch { return undefined; }
+}
+
+function detectFormat(lowerHeaders: string[]): { symbol: string; symbolKind?: 'market'|'asset'|'symbol'; type: string; amount: string; price?: string; timestamp: string; feeAsset?: string; feeAmount?: string } | null {
+  // Supported schemas (lower-cased header names):
+  // 1) generic: symbol,type,amount,price,timestamp
+  // 2) binance-like: date, market (BTCUSDT), type, price, amount
+  // 3) coinbase-like: timestamp, transaction type, asset, quantity transacted, spot price at transaction
+  const h = (name: string) => lowerHeaders.indexOf(name);
+  // Generic
+  if (h('symbol')>=0 && h('type')>=0 && h('amount')>=0 && h('timestamp')>=0) {
+    return { symbol: lowerHeaders[h('symbol')], symbolKind: 'symbol', type: lowerHeaders[h('type')], amount: lowerHeaders[h('amount')], price: h('price')>=0? lowerHeaders[h('price')]: undefined, timestamp: lowerHeaders[h('timestamp')], feeAsset: h('fee asset')>=0? lowerHeaders[h('fee asset')]: (h('fee asset/ccy')>=0? lowerHeaders[h('fee asset/ccy')]: (h('fee asset currency')>=0? lowerHeaders[h('fee asset currency')]: undefined)), feeAmount: h('fee')>=0? lowerHeaders[h('fee')]: (h('fee amount')>=0? lowerHeaders[h('fee amount')]: undefined) };
+  }
+  // Binance-like
+  if (h('date')>=0 && h('market')>=0 && h('type')>=0 && h('price')>=0 && h('amount')>=0) {
+    return { symbol: lowerHeaders[h('market')], symbolKind: 'market', type: lowerHeaders[h('type')], amount: lowerHeaders[h('amount')], price: lowerHeaders[h('price')], timestamp: lowerHeaders[h('date')], feeAsset: h('fee asset')>=0? lowerHeaders[h('fee asset')]: undefined, feeAmount: h('fee')>=0? lowerHeaders[h('fee')]: undefined };
+  }
+  // Coinbase-like
+  if (h('timestamp')>=0 && h('transaction type')>=0 && h('asset')>=0 && h('quantity transacted')>=0 && h('spot price at transaction')>=0) {
+    return { symbol: lowerHeaders[h('asset')], symbolKind: 'asset', type: lowerHeaders[h('transaction type')], amount: lowerHeaders[h('quantity transacted')], price: lowerHeaders[h('spot price at transaction')], timestamp: lowerHeaders[h('timestamp')], feeAsset: h('fee asset')>=0? lowerHeaders[h('fee asset')]: undefined, feeAmount: h('fee')>=0? lowerHeaders[h('fee')]: undefined };
+  }
+  // Bybit-like: time, symbol, side, price, qty
+  if (h('time')>=0 && h('symbol')>=0 && (h('side')>=0 || h('type')>=0) && (h('qty')>=0 || h('quantity')>=0) && h('price')>=0) {
+    const qtyKey = h('qty')>=0 ? lowerHeaders[h('qty')] : lowerHeaders[h('quantity')];
+    const typeKey = h('side')>=0 ? lowerHeaders[h('side')] : lowerHeaders[h('type')];
+    return { symbol: lowerHeaders[h('symbol')], symbolKind: 'symbol', type: typeKey, amount: qtyKey, price: lowerHeaders[h('price')], timestamp: lowerHeaders[h('time')], feeAsset: h('fee asset')>=0? lowerHeaders[h('fee asset')]: undefined, feeAmount: h('fee')>=0? lowerHeaders[h('fee')]: undefined };
+  }
+  // Kraken-like: time, type, asset pair, price, vol
+  if (h('time')>=0 && (h('type')>=0 || h('side')>=0) && (h('asset pair')>=0 || h('pair')>=0) && (h('vol')>=0 || h('volume')>=0) && h('price')>=0) {
+    const pairKey = h('asset pair')>=0 ? lowerHeaders[h('asset pair')] : lowerHeaders[h('pair')];
+    const volKey = h('vol')>=0 ? lowerHeaders[h('vol')] : lowerHeaders[h('volume')];
+    const typeKey = h('type')>=0 ? lowerHeaders[h('type')] : lowerHeaders[h('side')];
+    return { symbol: pairKey, symbolKind: 'market', type: typeKey, amount: volKey, price: lowerHeaders[h('price')], timestamp: lowerHeaders[h('time')], feeAsset: h('fee asset')>=0? lowerHeaders[h('fee asset')]: undefined, feeAmount: h('fee')>=0? lowerHeaders[h('fee')]: undefined };
+  }
+  return null;
+}
+
+function normalizeType(raw: string): 'trade'|'staking'|'airdrop'|'mining' {
+  const t = raw.toLowerCase();
+  if (['buy','sell','trade','spot','swap'].includes(t)) return 'trade';
+  if (['stake','staking','reward'].includes(t)) return 'staking';
+  if (['airdrop','gift'].includes(t)) return 'airdrop';
+  if (['mine','mining'].includes(t)) return 'mining';
+  return 'trade';
+}
+
+function extractBaseFromMarket(market: string): string {
+  const m = market.toUpperCase();
+  // Common quote assets to strip: USDT, USD, USDC, EUR, BTC, ETH
+  const quotes = ['USDT','USD','USDC','EUR','BTC','ETH'];
+  for (const q of quotes) {
+    if (m.endsWith(q) && m.length > q.length) return m.slice(0, m.length - q.length);
+  }
+  // If contains '-', take first part
+  if (m.includes('-')) return m.split('-')[0];
+  return m;
+}
+
+function normalizeAsset(asset: string): string {
+  return asset.replace(/[^A-Za-z0-9]/g, '');
+}
+
+function computeFeeUsd(args: { feeAsset?: string; feeAmount?: number; rowPrice?: number; symbol: string }): number | undefined {
+  const { feeAsset, feeAmount, rowPrice, symbol } = args;
+  if (!feeAmount || feeAmount <= 0) return undefined;
+  // If fee asset equals trade symbol, value by row unit price
+  if (feeAsset && feeAsset === symbol && rowPrice && Number.isFinite(rowPrice)) return feeAmount * rowPrice;
+  // If fee in USD-stable
+  if (feeAsset && /^(USD|USDT|USDC)$/i.test(feeAsset)) return feeAmount * 1;
+  // Fallback: use stub historical price
+  const stub = getHistoricalUsdPrice(feeAsset || 'BTC', Date.now());
+  return feeAmount * stub;
+}
+
+function getHistoricalUsdPrice(_symbol: string, _ts: number): number {
+  // TODO: integrate with CoinGecko; stub values for now
+  const map: Record<string, number> = { BTC: 65000, ETH: 3200, USDT: 1, USDC: 1 };
+  return map[_symbol.toUpperCase()] || 1;
+}
 
 function signToken(userId: string) {
   return jwt.sign({ sub: userId } as JwtPayload, JWT_SECRET, { expiresIn: '7d' });
@@ -74,6 +187,15 @@ app.get('/health', async (_req, res) => {
     await prisma.user.create({ data: {
       username: 'admin', email: 'admin@company.com', passwordHash: hash,
       fullName: 'Alex Admin', department: 'Admin', employeeId: 'EMP9999', role: 'admin'
+    }});
+  }
+  // seed trader
+  const trader = await prisma.user.findUnique({ where: { username: 'trader1' } });
+  if (!trader) {
+    const hash = await bcrypt.hash('password', 10);
+    await prisma.user.create({ data: {
+      username: 'trader1', email: 'trader1@company.com', passwordHash: hash,
+      fullName: 'Taylor Trader', department: 'Trading', employeeId: 'EMP7001', role: 'trader'
     }});
   }
   res.json({ ok: true });
@@ -221,7 +343,7 @@ app.get('/api/hr/employees', authMiddleware, requireRole('hr', 'admin'), async (
 });
 
 app.post('/api/hr/employees', authMiddleware, requireRole('hr', 'admin'), async (req, res) => {
-  const schema = z.object({ username: z.string(), email: z.string().email(), fullName: z.string(), department: z.string().optional(), role: z.enum(['employee', 'hr', 'admin']).default('employee'), password: z.string().min(6) });
+  const schema = z.object({ username: z.string(), email: z.string().email(), fullName: z.string(), department: z.string().optional(), role: z.enum(['employee', 'hr', 'admin', 'trader']).default('employee'), password: z.string().min(6) });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'Invalid payload' });
   const { username, email, fullName, department, role, password } = parsed.data;
@@ -235,7 +357,7 @@ app.post('/api/hr/employees', authMiddleware, requireRole('hr', 'admin'), async 
 });
 
 app.put('/api/hr/employees/:id/role', authMiddleware, requireRole('hr', 'admin'), async (req, res) => {
-  const schema = z.object({ role: z.enum(['employee', 'hr', 'admin']) });
+  const schema = z.object({ role: z.enum(['employee', 'hr', 'admin', 'trader']) });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'Invalid payload' });
   const { id } = req.params;
@@ -301,6 +423,371 @@ function randomCode() {
 function generateEmployeeId() {
   const num = Math.floor(Math.random() * 9000) + 1000;
   return `EMP${num}`;
+}
+
+// Trader APIs (stubs)
+app.get('/api/trader/forecast', authMiddleware, requireRole('trader', 'admin'), async (_req, res) => {
+  // Build from DB if available; fall back to in-memory; else demo
+  const reqAny = _req as any;
+  const dbTxs = await prisma.walletTransaction.findMany({ where: { userId: reqAny.userId } });
+  const txs = (dbTxs.length > 0)
+    ? dbTxs.map(r => ({ id: r.id, userId: r.userId, symbol: r.symbol, amount: r.amount, priceUsd: (r.priceUsdCents ?? 0) / 100, type: (r.type as any), timestamp: r.timestamp.toISOString(), source: safeDecrypt(r.sourceEnc) }))
+    : (userIdToWalletTxs[reqAny.userId] || []);
+  if (txs.length === 0) {
+    return res.json({
+      holdings: [
+        { symbol: 'BTC', amount: 0.25, priceUsd: 65000, valueUsd: 16250 },
+        { symbol: 'ETH', amount: 3.5, priceUsd: 3200, valueUsd: 11200 }
+      ],
+      totalValueUsd: 27450,
+      realizedGainsYtdUsd: 1250,
+      unrealizedGainsUsd: 3450,
+      estimatedTaxUsd: 375
+    });
+  }
+  const symbolToAmount: Record<string, number> = {};
+  for (const tx of txs) {
+    symbolToAmount[tx.symbol] = (symbolToAmount[tx.symbol] || 0) + tx.amount;
+  }
+  // naive pricing placeholders
+  const priceMap: Record<string, number> = { BTC: 65000, ETH: 3200 };
+  const holdings = Object.entries(symbolToAmount).map(([sym, amt]) => {
+    const price = priceMap[sym] || 1;
+    return { symbol: sym, amount: amt, priceUsd: price, valueUsd: amt * price };
+  });
+  const totalValueUsd = holdings.reduce((s, h) => s + h.valueUsd, 0);
+  // basic placeholders for gains and taxes
+  const realizedGainsYtdUsd = Math.max(0, txs.filter(t=>t.type==='trade').reduce((s,_t)=> s + 50, 0));
+  const unrealizedGainsUsd = Math.round(totalValueUsd * 0.12);
+  const estimatedTaxUsd = Math.round(realizedGainsYtdUsd * 0.15);
+  res.json({ holdings, totalValueUsd, realizedGainsYtdUsd, unrealizedGainsUsd, estimatedTaxUsd });
+});
+
+app.post('/api/trader/import/csv', authMiddleware, requireRole('trader', 'admin'), upload.single('file'), async (req: any, res) => {
+  if (!req.file || !req.file.buffer) return res.status(400).json({ error: 'CSV file is required' });
+  const dryRun = (req.query?.dryRun === '1' || req.query?.dryRun === 'true');
+  const csv = req.file.buffer.toString('utf8');
+  let records: any[];
+  try {
+    records = parse(csv, { columns: true, skip_empty_lines: true, trim: true });
+  } catch {
+    return res.status(400).json({ error: 'Invalid CSV format' });
+  }
+  if (!Array.isArray(records) || records.length === 0) return res.status(400).json({ error: 'No rows found' });
+  // Detect columns
+  const headerOrig = Object.keys(records[0]);
+  const header = headerOrig.map(k=>k.toLowerCase());
+  const mapping = detectFormat(header);
+  if (!mapping) return res.status(400).json({ error: 'Unsupported CSV format' });
+  // Validate and transform rows
+  const rowErrors: { row: number; message: string }[] = [];
+  const preview: { row: number; symbol: string; amount: number; price?: number; type: string; timestamp: string; feeAsset?: string; feeAmount?: number; feeUsd?: number }[] = [];
+  const toPersist: { symbol: string; amount: number; priceUsdCents?: number; type: string; timestamp: Date; sourceEnc?: string; feeAsset?: string; feeAmount?: number; feeUsdCents?: number }[] = [];
+  for (let i=0; i<records.length; i++) {
+    const r = records[i];
+    const rowNum = i + 2; // +1 header, +1 1-indexed
+    // Extract fields according to mapping with helpers for market/asset symbols
+    let rawSymbol = String(r[mapping.symbol] ?? '').trim();
+    if (mapping.symbolKind === 'market') rawSymbol = extractBaseFromMarket(rawSymbol);
+    if (mapping.symbolKind === 'asset') rawSymbol = normalizeAsset(rawSymbol);
+    const symbol = rawSymbol.toUpperCase();
+    const rawType = String(r[mapping.type] ?? '');
+    const type = normalizeType(rawType);
+    let amount = parseFloat(String(r[mapping.amount] ?? ''));
+    const price = mapping.price ? parseFloat(String(r[mapping.price] ?? '')) : undefined;
+    const feeAsset = mapping.feeAsset ? String(r[mapping.feeAsset] ?? '').toUpperCase() : undefined;
+    const feeAmount = mapping.feeAmount ? parseFloat(String(r[mapping.feeAmount] ?? '')) : undefined;
+    const timeRaw = String(r[mapping.timestamp] ?? '');
+    const timestamp = new Date(timeRaw);
+    const errors: string[] = [];
+    if (!symbol || !/^[A-Z0-9]{2,10}$/.test(symbol)) errors.push('invalid symbol');
+    if (!['trade','staking','airdrop','mining'].includes(type)) errors.push('invalid type');
+    if (!Number.isFinite(amount)) errors.push('invalid amount');
+    if (mapping.price && !Number.isFinite(price as number)) errors.push('invalid price');
+    if (isNaN(timestamp.getTime())) errors.push('invalid timestamp');
+    if (errors.length > 0) {
+      rowErrors.push({ row: rowNum, message: errors.join(', ') });
+      continue;
+    }
+    if (type === 'trade') {
+      const isSell = /sell|withdraw|redeem/i.test(rawType);
+      amount = isSell ? -Math.abs(amount) : Math.abs(amount);
+    }
+    const feeUsd = computeFeeUsd({ feeAsset, feeAmount, rowPrice: price, symbol });
+    preview.push({ row: rowNum, symbol, amount, price, type, timestamp: timestamp.toISOString(), feeAsset, feeAmount, feeUsd });
+    toPersist.push({ symbol, amount, priceUsdCents: price !== undefined ? Math.round((price as number) * 100) : undefined, type, timestamp, sourceEnc: encryptString(JSON.stringify({ source: 'CSV' })), feeAsset, feeAmount, feeUsdCents: feeUsd !== undefined ? Math.round(feeUsd * 100) : undefined });
+  }
+  if (dryRun) {
+    return res.json({ ok: true, dryRun: true, rows: preview.slice(0, 200), errors: rowErrors.slice(0, 200), totalValid: preview.length, totalErrors: rowErrors.length });
+  }
+  if (toPersist.length === 0) {
+    return res.status(400).json({ error: 'No valid rows to import', errors: rowErrors.slice(0, 200) });
+  }
+  const created = await prisma.$transaction(
+    toPersist.map(t => prisma.walletTransaction.create({ data: { userId: req.userId, symbol: t.symbol, amount: t.amount, priceUsdCents: t.priceUsdCents, type: t.type, timestamp: t.timestamp, sourceEnc: t.sourceEnc, feeAsset: t.feeAsset, feeAmount: t.feeAmount, feeUsdCents: t.feeUsdCents } }))
+  );
+  res.json({ ok: true, imported: created.length, errors: rowErrors, totalValid: toPersist.length, totalErrors: rowErrors.length });
+});
+
+app.get('/api/trader/report.pdf', authMiddleware, requireRole('trader', 'admin'), async (_req, res) => {
+  const reqAny = _req as any;
+  const { start, end, brand, logo } = _req.query as { start?: string; end?: string; brand?: string; logo?: string };
+  const range: any = {};
+  if (start) range.gte = new Date(start);
+  if (end) range.lte = new Date(end);
+  const where: any = { userId: reqAny.userId };
+  if (start || end) where.timestamp = range;
+  const txs = await prisma.walletTransaction.findMany({ where, orderBy: { timestamp: 'asc' } });
+  const rows = txs.map(t=>({
+    date: t.timestamp.toISOString().slice(0,10),
+    symbol: t.symbol,
+    type: t.type,
+    amount: t.amount,
+    price: (t.priceUsdCents ?? 0) / 100,
+    value: (t.priceUsdCents ?? 0) / 100 * t.amount
+  }));
+  const totals = rows.reduce((acc, r)=>{ acc.value += r.value; return acc; }, { value: 0 });
+  // Holdings aggregation (latest price per symbol)
+  const latestPrice: Record<string, number> = {};
+  for (const r of rows) if (r.price) latestPrice[r.symbol] = r.price;
+  const holdingsMap: Record<string, number> = {};
+  for (const r of rows) if (r.type === 'trade') holdingsMap[r.symbol] = (holdingsMap[r.symbol]||0) + r.amount;
+  const holdings = Object.entries(holdingsMap).map(([sym, amt])=>({ symbol: sym, amount: amt, price: latestPrice[sym] || 0, value: (latestPrice[sym] || 0) * amt }));
+  const holdingsTotal = holdings.reduce((s,h)=> s + h.value, 0);
+  // Placeholder gains
+  const realizedGains = rows.filter(r=>r.type==='trade' && r.amount < 0).length * 50;
+  const unrealizedGains = Math.round(holdingsTotal * 0.12);
+  const estTax = Math.round(realizedGains * 0.15);
+  const html = renderReportHtml({
+    brand: brand || 'PayrollPro',
+    logoUrl: logo || '',
+    dateRange: { start: start || '', end: end || '' },
+    rows,
+    totals: { value: totals.value },
+    holdings,
+    realizedGains,
+    unrealizedGains,
+    estTax
+  });
+  const browser = await puppeteer.launch({ args: ['--no-sandbox','--disable-setuid-sandbox'] });
+  const page = await browser.newPage();
+  await page.setContent(html, { waitUntil: 'networkidle0' });
+  const pdf = await page.pdf({
+    format: 'A4', printBackground: true,
+    margin: { top: '20mm', bottom: '20mm', left: '12mm', right: '12mm' },
+    displayHeaderFooter: true,
+    headerTemplate: `<div style="font-size:10px; width:100%; padding:0 12mm; display:flex; justify-content:space-between; align-items:center; font-family: Arial; color:#888;">
+      <span>${(brand || 'PayrollPro')}</span>
+      <span>Crypto Tax Report</span>
+    </div>`,
+    footerTemplate: `<div style="font-size:10px; width:100%; padding:0 12mm; display:flex; justify-content:space-between; align-items:center; font-family: Arial; color:#888;">
+      <span>${(brand || 'PayrollPro')}</span>
+      <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
+    </div>`
+  });
+  await browser.close();
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', 'attachment; filename="crypto_tax_report.pdf"');
+  res.end(pdf);
+});
+
+function renderReportHtml(data: {
+  brand: string;
+  logoUrl: string;
+  dateRange: { start: string; end: string };
+  rows: { date: string; symbol: string; type: string; amount: number; price: number; value: number }[];
+  totals: { value: number };
+  holdings: { symbol: string; amount: number; price: number; value: number }[];
+  realizedGains: number;
+  unrealizedGains: number;
+  estTax: number;
+}): string {
+  const txRowsHtml = data.rows.slice(0,500).map(r=>`
+    <tr>
+      <td>${r.date}</td>
+      <td>${r.symbol}</td>
+      <td>${r.type}</td>
+      <td style="text-align:right;">${r.amount}</td>
+      <td style="text-align:right;">$${r.price.toLocaleString()}</td>
+      <td style="text-align:right;">$${r.value.toLocaleString()}</td>
+    </tr>
+  `).join('');
+  const holdingRowsHtml = data.holdings.map(h=>`
+    <tr>
+      <td>${h.symbol}</td>
+      <td style="text-align:right;">${h.amount}</td>
+      <td style="text-align:right;">$${h.price.toLocaleString()}</td>
+      <td style="text-align:right;">$${h.value.toLocaleString()}</td>
+    </tr>
+  `).join('');
+  const rangeText = data.dateRange.start && data.dateRange.end ? `${data.dateRange.start} to ${data.dateRange.end}` : 'All time';
+  return `<!DOCTYPE html>
+  <html>
+  <head>
+    <meta charset="utf-8"/>
+    <style>
+      body { font-family: Arial, sans-serif; color: #111; }
+      h1 { font-size: 20px; margin: 0 0 4px 0; }
+      h2 { font-size: 16px; margin: 12px 0 6px 0; }
+      .muted { color:#555; font-size: 12px; }
+      table { width:100%; border-collapse: collapse; font-size: 11px; }
+      th, td { border-bottom: 1px solid #ddd; padding: 6px; }
+      th { background: #f7f7f7; text-align: left; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+      .card { border: 1px solid #eee; padding: 8px; border-radius: 6px; background: #fafafa; }
+      .card .label { font-size: 11px; color:#666; }
+      .card .value { font-weight: 700; font-size: 14px; }
+      .watermark { position: fixed; top: 40%; left: 50%; transform: translate(-50%, -50%) rotate(-25deg); font-size: 72px; color: rgba(0,0,0,0.05); z-index: 0; pointer-events: none; }
+      .section { position: relative; z-index: 1; }
+      .brand-row { display:flex; gap: 10px; align-items:center; margin-bottom: 6px; }
+      .brand-row img { height: 28px; }
+      .sig-grid { display:grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 10px; }
+      .sig-box { border-top: 1px solid #333; padding-top: 6px; font-size: 12px; color:#333; }
+    </style>
+  </head>
+  <body>
+    <div class="watermark">${data.brand}</div>
+    <div class="section">
+      <div class="brand-row">
+        ${data.logoUrl ? `<img src="${data.logoUrl}" alt="${data.brand} logo"/>` : ''}
+        <h1>${data.brand} — Crypto Tax Report</h1>
+      </div>
+      <div class="muted">Range: ${rangeText}</div>
+      <div class="grid" style="margin-top:8px;">
+        <div class="card"><div class="label">Approx. Portfolio Value</div><div class="value">$${data.totals.value.toLocaleString()}</div></div>
+        <div class="card"><div class="label">Realized Gains (est)</div><div class="value">$${data.realizedGains.toLocaleString()}</div></div>
+        <div class="card"><div class="label">Unrealized Gains (est)</div><div class="value">$${data.unrealizedGains.toLocaleString()}</div></div>
+      </div>
+    </div>
+    <div class="section">
+      <h2>Holdings</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Asset</th>
+            <th style="text-align:right;">Amount</th>
+            <th style="text-align:right;">Price (USD)</th>
+            <th style="text-align:right;">Value (USD)</th>
+          </tr>
+        </thead>
+        <tbody>${holdingRowsHtml}</tbody>
+      </table>
+    </div>
+    <div class="section">
+      <h2>Transactions</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Asset</th>
+            <th>Type</th>
+            <th style="text-align:right;">Amount</th>
+            <th style="text-align:right;">Price (USD)</th>
+            <th style="text-align:right;">Value (USD)</th>
+          </tr>
+        </thead>
+        <tbody>${txRowsHtml}</tbody>
+      </table>
+    </div>
+    <div class="section" style="margin-top:8px;">
+      <h2>Disclaimers</h2>
+      <div class="muted">
+        <div>- This report is informational and not tax advice.</div>
+        <div>- Data may contain inaccuracies based on exchange exports and mapping.</div>
+        <div>- Consult a qualified tax professional before filing.</div>
+      </div>
+      <h2 style="margin-top:10px;">Signatures</h2>
+      <div class="sig-grid">
+        <div class="sig-box">Prepared by (Name, Title, Date)</div>
+        <div class="sig-box">Approved by (Name, Title, Date)</div>
+      </div>
+    </div>
+  </body>
+  </html>`;
+}
+
+// List transactions (in-memory store)
+app.get('/api/trader/transactions', authMiddleware, requireRole('trader', 'admin'), async (_req, res) => {
+  const reqAny = _req as any;
+  const rows = await prisma.walletTransaction.findMany({ where: { userId: reqAny.userId }, orderBy: { timestamp: 'desc' } });
+  const items: WalletTx[] = rows.map(r => ({ id: r.id, userId: r.userId, symbol: r.symbol, amount: r.amount, priceUsd: (r.priceUsdCents ?? 0) / 100, type: (r.type as any), timestamp: r.timestamp.toISOString(), source: safeDecrypt(r.sourceEnc) }));
+  res.json({ transactions: items });
+});
+
+// Gains calculation (FIFO/LIFO - simplified placeholder)
+app.get('/api/trader/gains', authMiddleware, requireRole('trader', 'admin'), async (_req, res) => {
+  const strategy = (typeof _req.query.strategy === 'string' ? _req.query.strategy : 'fifo').toLowerCase();
+  const reqAny = _req as any;
+  const rows = await prisma.walletTransaction.findMany({ where: { userId: reqAny.userId, type: 'trade' }, orderBy: { timestamp: 'asc' } });
+  const txs = rows.map(r=>({ symbol: r.symbol, amount: r.amount, price: (r.priceUsdCents ?? 0)/100, date: r.timestamp, feeUsd: (r.feeUsdCents ?? 0)/100 || undefined }));
+  const result = computeGains(txs, strategy === 'lifo' ? 'lifo' : 'fifo');
+  res.json(result.summary);
+});
+
+app.get('/api/trader/gains/full', authMiddleware, requireRole('trader', 'admin'), async (_req, res) => {
+  const strategy = (typeof _req.query.strategy === 'string' ? _req.query.strategy : 'fifo').toLowerCase();
+  const reqAny = _req as any;
+  const rows = await prisma.walletTransaction.findMany({ where: { userId: reqAny.userId, type: 'trade' }, orderBy: { timestamp: 'asc' } });
+  const txs = rows.map(r=>({ symbol: r.symbol, amount: r.amount, price: (r.priceUsdCents ?? 0)/100, date: r.timestamp, feeUsd: (r.feeUsdCents ?? 0)/100 || undefined }));
+  const result = computeGains(txs, strategy === 'lifo' ? 'lifo' : 'fifo');
+  res.json(result);
+});
+
+type TradeTx = { symbol: string; amount: number; price: number; date: Date; feeUsd?: number };
+type Lot = { remaining: number; price: number; date: Date };
+function computeGinsForSymbol(txs: TradeTx[], method: 'fifo'|'lifo'){
+  const buys: Lot[] = [];
+  const sales: { date: Date; qty: number; proceeds: number; cost: number; gain: number; term: 'short'|'long' }[] = [];
+  const pick = (arr: Lot[]) => method==='fifo' ? arr.shift()! : arr.pop()!;
+  for (const tx of txs) {
+    if (tx.amount > 0) {
+      const feePerUnit = tx.feeUsd ? (tx.feeUsd / tx.amount) : 0;
+      buys.push({ remaining: tx.amount, price: tx.price + feePerUnit, date: tx.date });
+    } else if (tx.amount < 0) {
+      let qtyToSell = -tx.amount;
+      let proceeds = qtyToSell * tx.price;
+      if (tx.feeUsd) proceeds -= tx.feeUsd;
+      let costSum = 0;
+      while (qtyToSell > 0 && buys.length > 0) {
+        const lot = pick(buys);
+        const useQty = Math.min(qtyToSell, lot.remaining);
+        const cost = useQty * lot.price;
+        costSum += cost;
+        lot.remaining -= useQty;
+        qtyToSell -= useQty;
+        if (lot.remaining > 0) {
+          if (method==='fifo') buys.unshift(lot); else buys.push(lot);
+        }
+      }
+      const gain = proceeds - costSum;
+      const heldDays = buys.length>0 ? Math.floor((+tx.date - +buys[0].date)/86400000) : 0;
+      const term = heldDays >= 365 ? 'long' : 'short';
+      sales.push({ date: tx.date, qty: -tx.amount, proceeds, cost: costSum, gain, term });
+    }
+  }
+  const summary = {
+    realizedGainsUsd: Math.round(sales.reduce((s, r)=> s + r.gain, 0)),
+    shortTermUsd: Math.round(sales.filter(r=>r.term==='short').reduce((s,r)=> s + r.gain, 0)),
+    longTermUsd: Math.round(sales.filter(r=>r.term==='long').reduce((s,r)=> s + r.gain, 0))
+  };
+  return { sales, summary };
+}
+
+function computeGains(txs: TradeTx[], method: 'fifo'|'lifo'){
+  const bySymbol: Record<string, TradeTx[]> = {};
+  for (const t of txs) {
+    bySymbol[t.symbol] = (bySymbol[t.symbol] || []).concat(t);
+  }
+  const symbols = Object.keys(bySymbol);
+  const details = symbols.map(sym => ({ symbol: sym, ...computeGinsForSymbol(bySymbol[sym], method) }));
+  const allSales = details.flatMap(d => d.sales);
+  const summary = {
+    strategy: method,
+    realizedGainsUsd: Math.round(allSales.reduce((s,r)=> s + r.gain, 0)),
+    shortTermUsd: Math.round(allSales.filter(r=>r.term==='short').reduce((s,r)=> s + r.gain, 0)),
+    longTermUsd: Math.round(allSales.filter(r=>r.term==='long').reduce((s,r)=> s + r.gain, 0))
+  };
+  return { summary, details };
 }
 
 const port = process.env.PORT || 4000;

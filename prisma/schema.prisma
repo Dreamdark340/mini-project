@@ -30,6 +30,8 @@ model User {
   // relations
   sessions      Session[]
   payrolls      PayrollEntry[]
+  walletTxs     WalletTransaction[]
+  holdingSnaps  HoldingSnapshot[]
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 }
@@ -64,4 +66,30 @@ model PayrollEntry {
   deductions   Int      // cents
   netPay       Int      // cents
   createdAt    DateTime @default(now())
+}
+
+model WalletTransaction {
+  id            String   @id @default(cuid())
+  user          User     @relation(fields: [userId], references: [id])
+  userId        String
+  symbol        String
+  amount        Float
+  priceUsdCents Int?
+  feeAsset      String?
+  feeAmount     Float?
+  feeUsdCents   Int?
+  type          String   // trade | staking | airdrop | mining
+  timestamp     DateTime
+  sourceEnc     String?  // encrypted metadata JSON
+  createdAt     DateTime @default(now())
+}
+
+model HoldingSnapshot {
+  id                 String   @id @default(cuid())
+  user               User     @relation(fields: [userId], references: [id])
+  userId             String
+  asOf               DateTime
+  dataEnc            String   // encrypted snapshot JSON of holdings
+  totalValueUsdCents Int?
+  createdAt          DateTime @default(now())
 }
