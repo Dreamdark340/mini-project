@@ -32,6 +32,26 @@
       pingHealth();
       // Role switcher
       initRoleSwitcher();
+      // File-based autofill
+      const fileInput = document.getElementById('loginFile');
+      if(fileInput){
+        fileInput.addEventListener('change', async (e)=>{
+          const file = (e.target as HTMLInputElement).files?.[0];
+          if(!file) return;
+          try{
+            const txt = await file.text();
+            const { username, password, role } = JSON.parse(txt);
+            if(username) (document.getElementById('username') as HTMLInputElement).value = username;
+            if(password) (document.getElementById('password') as HTMLInputElement).value = password;
+            if(role){
+              const sel = document.getElementById('roleSelect') as HTMLSelectElement;
+              if(sel){ sel.value = role; sel.dispatchEvent(new Event('change')); }
+            }
+          }catch(err){
+            alert('Invalid JSON file. Expected {"username":"","password":"","role":""}');
+          }
+        });
+      }
     }
 
     let pendingUser = null;
@@ -129,6 +149,10 @@
 
       <!-- Step 1: Credentials -->
       <form id="loginForm">
+        <div class="form-group">
+          <label for="loginFile">Load credentials file</label>
+          <input type="file" id="loginFile" accept="application/json">
+        </div>
         <div class="form-group">
           <label for="roleSelect">Quick role</label>
           <select id="roleSelect">
