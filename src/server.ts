@@ -6,6 +6,9 @@ import { PrismaClient } from '@prisma/client';
 import speakeasy from 'speakeasy';
 import { z } from 'zod';
 import rateLimit from 'express-rate-limit';
+import path from 'path';
+// Serve static frontend files located at project root
+app.use(express.static(path.join(__dirname, '..')));
 
 const prisma = new PrismaClient();
 const app = express();
