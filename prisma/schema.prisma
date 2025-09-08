@@ -32,6 +32,7 @@ model User {
   payrolls      PayrollEntry[]
   trades        Trade[]
   whatIfSessions WhatIfSession[]
+  auditLogs     AuditLog[]
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 }
@@ -87,4 +88,13 @@ model WhatIfSession {
   method     String
   summaryJson String
   createdAt  DateTime @default(now())
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  user       User?    @relation(fields: [userId], references: [id])
+  userId     String?
+  action     String
+  metaJson   String
+  timestamp  DateTime @default(now())
 }
