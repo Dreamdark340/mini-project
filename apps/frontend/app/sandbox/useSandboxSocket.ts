@@ -1,24 +1,34 @@
 "use client";
 import { useEffect, useState } from "react";
-import { CostBasisMethod, GainSummary } from "@shared/types";
+import { GainSummary } from "@shared/types";
 
-export default function useSandboxSocket(method: CostBasisMethod) {
-  const [summary, setSummary] = useState<GainSummary | null>(null);
+interface SocketState {
+  summary: GainSummary | null;
+  error: string | null;
+}
+
+export default function useSandboxSocket(sessionId: string | null) {
+  const [state, setState] = useState<SocketState>({ summary: null, error: null });
 
   useEffect(() => {
-    const ws = new WebSocket(`/ws/sandbox?method=${method}`);
+    if (!sessionId) return;
+    const ws = new WebSocket(`/ws/sandbox?sessionId=${sessionId}`);
 
     ws.onmessage = (ev) => {
       try {
         const data = JSON.parse(ev.data);
-        if (data.summary) setSummary(data.summary as GainSummary);
+        if (data.error) {
+          setState((s) => ({ ...s, error: data.message || "Unknown error" }));
+        } else if (data.summary) {
+          setState({ summary: data.summary as GainSummary, error: null });
+        }
       } catch (_) {}
     };
 
     return () => {
       ws.close();
     };
-  }, [method]);
+  }, [sessionId]);
 
-  return { summary };
+  return state;
 }
