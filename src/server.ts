@@ -8,6 +8,7 @@ import { z } from 'zod';
 import rateLimit from 'express-rate-limit';
 import path from 'path';
 import expressWs from 'express-ws';
+import { calcGainsQueue, redisSub } from './queue';
 // Serve static frontend files located at project root
 app.use(express.static(path.join(__dirname, '..')));
 
@@ -306,27 +307,31 @@ app.post('/api/what-if/sessions', authMiddleware, async (req:any,res)=>{
   const parsed=schema.safeParse(req.body); if(!parsed.success) return res.status(400).json({error:'Invalid'});
   const id=`ws_${Date.now().toString(36)}`;
   const userId=req.userId;
-  // TODO fetch trades from db – placeholder empty
-  const trades:Trade[]=[];
-  const { summary } = gainsService.calculate(trades, parsed.data.method);
-  const sess:InMemSession={ id,userId,method:parsed.data.method,summary};
-  sessions.set(id,sess);
-  res.status(201).json({id,summary});
+  await prisma.whatIfSession.create({ data:{ id, userId, method: parsed.data.method, summaryJson: '' } });
+  await calcGainsQueue.add('calc', { sessionId:id, userId, method: parsed.data.method });
+  res.status(202).json({ id, status:'queued' });
 });
 
-app.get('/api/what-if/sessions/:id', authMiddleware, (req:any,res)=>{
-  const s=sessions.get(req.params.id);
-  if(!s||s.userId!==req.userId) return res.status(404).json({error:'Not found'});
-  res.json({ summary:s.summary });
+app.get('/api/what-if/sessions/:id/status', authMiddleware, async (req:any,res)=>{
+  const sess = await prisma.whatIfSession.findUnique({ where:{ id:req.params.id } });
+  if(!sess || sess.userId!==req.userId) return res.status(404).json({error:'Not found'});
+  const ready = !!sess.summaryJson;
+  res.json({ status: ready? 'ready':'queued' });
 });
 
 (app as any).ws('/ws/sandbox', (ws:any, req:any)=>{
-  const method=req.query.method as CostBasisMethod||'FIFO';
-  // simple timer push mock
-  const int=setInterval(()=>{
-    ws.send(JSON.stringify({ summary:{ shortTermGain:Math.random()*1000, longTermGain:Math.random()*500, totalGain:0 }}));
-  },2000);
-  ws.on('close',()=>clearInterval(int));
+  const sessionId = req.query.sessionId as string;
+  if(!sessionId){ ws.close(); return; }
+  const channel = `sandbox:${sessionId}`;
+  const handler = (msgChannel:string,msg:string)=>{
+    if(msgChannel===channel){ ws.send(JSON.stringify({ summary: JSON.parse(msg) as GainSummary })); }
+  };
+  redisSub.subscribe(channel);
+  redisSub.on('message', handler);
+  ws.on('close',()=>{
+    redisSub.off('message', handler);
+    redisSub.unsubscribe(channel);
+  });
 });
 
 function randomCode() {
