@@ -1,9 +1,9 @@
-import { LotMatcher } from '../interfaces/lot-matcher.interface';
-import { Trade, GainDetail } from '@shared/types';
+import { Trade } from '@shared/types';
+import { BaseMatcher } from './base.matcher';
 
-export class SpecIdMatcher implements LotMatcher {
-  match(trades: Trade[]): GainDetail[] {
-    // TODO: implement Specific Identification matching (requires lot selection)
-    return [];
+export class SpecIdMatcher extends BaseMatcher {
+  orderBuys(buys: Trade[]): Trade[] {
+    // For SPEC ID, the UI/backend must inject an explicit order; throw until implemented
+    throw new Error('SpecIdMatcher requires explicit lot order input');
   }
 }

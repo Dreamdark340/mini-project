@@ -1,9 +1,9 @@
-import { LotMatcher } from '../interfaces/lot-matcher.interface';
-import { Trade, GainDetail } from '@shared/types';
+import { Trade } from '@shared/types';
+import { BaseMatcher } from './base.matcher';
 
-export class LifoMatcher implements LotMatcher {
-  match(trades: Trade[]): GainDetail[] {
-    // TODO: implement LIFO matching
-    return [];
+export class LifoMatcher extends BaseMatcher {
+  orderBuys(buys: Trade[]): Trade[] {
+    // Newest buys first
+    return buys.sort((a, b) => b.executedAt.getTime() - a.executedAt.getTime());
   }
 }
