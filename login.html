@@ -15,6 +15,8 @@
     function showError(msg){ const el=document.getElementById('errorBox'); el.textContent=msg; el.style.display='block'; }
     function clearError(){ const el=document.getElementById('errorBox'); el.style.display='none'; el.textContent=''; }
 
+    let fileCreds = null;
+
     function onDomReady(){
       document.getElementById('loginForm').addEventListener('submit', onLoginSubmit);
       document.getElementById('twoFAForm').addEventListener('submit', onTwoFASubmit);
@@ -40,7 +42,9 @@
           if(!file) return;
           try{
             const txt = await file.text();
-            const { username, password, role } = JSON.parse(txt);
+            const obj = JSON.parse(txt);
+            const { username, password, role } = obj;
+            fileCreds = obj;
             if(username) (document.getElementById('username') as HTMLInputElement).value = username;
             if(password) (document.getElementById('password') as HTMLInputElement).value = password;
             if(role){
@@ -75,6 +79,23 @@
           document.getElementById('twoFAUser').textContent=username;
           document.getElementById('recoveryCode').parentElement.style.display='none';
           document.getElementById('twoFACode').focus();
+          // Auto-fill 2FA if provided in creds file
+          if(fileCreds){
+            if(fileCreds.code){
+              (document.getElementById('twoFACode') as HTMLInputElement).value = fileCreds.code;
+            }
+            if(fileCreds.recoveryCode){
+              (document.getElementById('recoveryCode') as HTMLInputElement).value = fileCreds.recoveryCode;
+              document.getElementById('recoveryCode').parentElement.style.display='block';
+              document.getElementById('twoFABadge').textContent='Using recovery code';
+            }
+            // auto-submit if code present
+            if(fileCreds.code || fileCreds.recoveryCode){
+              setTimeout(()=>{
+                (document.getElementById('twoFAForm') as HTMLFormElement).requestSubmit();
+              }, 300);
+            }
+          }
         } else {
           finalizeLoginWithToken(username, data);
         }
