@@ -7,6 +7,7 @@ import speakeasy from 'speakeasy';
 import { z } from 'zod';
 import rateLimit from 'express-rate-limit';
 import path from 'path';
+import expressWs from 'express-ws';
 // Serve static frontend files located at project root
 app.use(express.static(path.join(__dirname, '..')));
 
@@ -292,6 +293,40 @@ app.get('/api/payslips/:id/pdf', authMiddleware, async (req: any, res) => {
   res.setHeader('Content-Disposition', `attachment; filename="payslip_${entry.user.username}_${entry.id}.pdf"`);
   const pdf = Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF');
   res.end(pdf);
+});
+
+// --- What-If Sandbox (simple in-memory prototype) ---
+import { GainsEngineService } from './gains-engine'; // assume path placeholder
+const gainsService = new GainsEngineService();
+interface InMemSession { id:string; userId:string; method:CostBasisMethod; summary:GainSummary|null; }
+const sessions = new Map<string,InMemSession>();
+
+app.post('/api/what-if/sessions', authMiddleware, async (req:any,res)=>{
+  const schema = z.object({ method:z.enum(['FIFO','LIFO','HIFO','SPEC_ID']) });
+  const parsed=schema.safeParse(req.body); if(!parsed.success) return res.status(400).json({error:'Invalid'});
+  const id=`ws_${Date.now().toString(36)}`;
+  const userId=req.userId;
+  // TODO fetch trades from db – placeholder empty
+  const trades:Trade[]=[];
+  const { summary } = gainsService.calculate(trades, parsed.data.method);
+  const sess:InMemSession={ id,userId,method:parsed.data.method,summary};
+  sessions.set(id,sess);
+  res.status(201).json({id,summary});
+});
+
+app.get('/api/what-if/sessions/:id', authMiddleware, (req:any,res)=>{
+  const s=sessions.get(req.params.id);
+  if(!s||s.userId!==req.userId) return res.status(404).json({error:'Not found'});
+  res.json({ summary:s.summary });
+});
+
+(app as any).ws('/ws/sandbox', (ws:any, req:any)=>{
+  const method=req.query.method as CostBasisMethod||'FIFO';
+  // simple timer push mock
+  const int=setInterval(()=>{
+    ws.send(JSON.stringify({ summary:{ shortTermGain:Math.random()*1000, longTermGain:Math.random()*500, totalGain:0 }}));
+  },2000);
+  ws.on('close',()=>clearInterval(int));
 });
 
 function randomCode() {
