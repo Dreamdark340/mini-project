@@ -9,6 +9,7 @@ import rateLimit from 'express-rate-limit';
 import path from 'path';
 import expressWs from 'express-ws';
 import { calcGainsQueue, redisSub } from './queue';
+import { audit } from './audit';
 // Serve static frontend files located at project root
 app.use(express.static(path.join(__dirname, '..')));
 
@@ -308,7 +309,8 @@ app.post('/api/what-if/sessions', authMiddleware, async (req:any,res)=>{
   const id=`ws_${Date.now().toString(36)}`;
   const userId=req.userId;
   await prisma.whatIfSession.create({ data:{ id, userId, method: parsed.data.method, summaryJson: '' } });
-  await calcGainsQueue.add('calc', { sessionId:id, userId, method: parsed.data.method });
+  await calcGainsQueue.add('calc', { sessionId:id, userId, method: parsed.data.method }, { attempts:3, backoff:{ type:'exponential', delay:5000 } });
+  audit(userId, 'enqueue_session', { sessionId:id, method: parsed.data.method });
   res.status(202).json({ id, status:'queued' });
 });
 
