@@ -8,6 +8,7 @@
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
   <script>
     const API_BASE = 'http://localhost:4000';
+    let apiOnline = false;
     function generateId(prefix='id'){ return `${prefix}_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}`; }
     function getSessions(u){ return []; }
     function setSessions(u,s){}
@@ -43,7 +44,25 @@
       const password=document.getElementById('password').value||'';
       rememberMe=document.getElementById('remember').checked;
       if(!username || !password){ showError('Enter username and password.'); return; }
-      // Call backend
+      // If API is offline, use demo fallback for known users
+      if(!apiOnline){
+        const demoUsers = {
+          'aaron': { password: 'password', role: 'employee' },
+          'hr1': { password: 'password', role: 'hr' },
+          'admin': { password: 'admin123', role: 'admin' }
+        };
+        const entry = demoUsers[username.toLowerCase()];
+        if(entry && entry.password === password){
+          const fakeToken = `demo.${btoa(username)}.${Date.now()}`;
+          const fakeData = { token: fakeToken, sessionId: generateId('sess'), user: { username, role: entry.role }, twoFARequired: false };
+          finalizeLoginWithToken(username, fakeData);
+          return;
+        } else {
+          showError('Invalid username or password.');
+          return;
+        }
+      }
+      // Call backend when API is online
       try{
         const resp = await fetch(`${API_BASE}/api/auth/login`, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ username, password, userAgent: navigator.userAgent }) });
         if(!resp.ok){ showError('Invalid username or password.'); return; }
@@ -94,11 +113,14 @@
       try{
         const r = await fetch(`${API_BASE}/health`, { method:'GET' });
         if(!r.ok) throw new Error('bad');
+        apiOnline = true;
         document.getElementById('apiStatus').textContent='API: Online';
         document.getElementById('apiStatus').className='status-badge success';
       }catch{
-        document.getElementById('apiStatus').textContent='API: Offline';
-        document.getElementById('apiStatus').className='status-badge danger';
+        apiOnline = false;
+        const statusEl = document.getElementById('apiStatus');
+        statusEl.textContent='API: Offline (Demo Mode)';
+        statusEl.className='status-badge danger';
       }
     }
 
