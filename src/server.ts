@@ -6,6 +6,12 @@ import { PrismaClient } from '@prisma/client';
 import speakeasy from 'speakeasy';
 import { z } from 'zod';
 import rateLimit from 'express-rate-limit';
+import path from 'path';
+import expressWs from 'express-ws';
+import { calcGainsQueue, redisSub } from './queue';
+import { audit } from './audit';
+// Serve static frontend files located at project root
+app.use(express.static(path.join(__dirname, '..')));
 
 const prisma = new PrismaClient();
 const app = express();
@@ -289,6 +295,45 @@ app.get('/api/payslips/:id/pdf', authMiddleware, async (req: any, res) => {
   res.setHeader('Content-Disposition', `attachment; filename="payslip_${entry.user.username}_${entry.id}.pdf"`);
   const pdf = Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF');
   res.end(pdf);
+});
+
+// --- What-If Sandbox (simple in-memory prototype) ---
+import { GainsEngineService } from './gains-engine'; // assume path placeholder
+const gainsService = new GainsEngineService();
+interface InMemSession { id:string; userId:string; method:CostBasisMethod; summary:GainSummary|null; }
+const sessions = new Map<string,InMemSession>();
+
+app.post('/api/what-if/sessions', authMiddleware, async (req:any,res)=>{
+  const schema = z.object({ method:z.enum(['FIFO','LIFO','HIFO','SPEC_ID']) });
+  const parsed=schema.safeParse(req.body); if(!parsed.success) return res.status(400).json({error:'Invalid'});
+  const id=`ws_${Date.now().toString(36)}`;
+  const userId=req.userId;
+  await prisma.whatIfSession.create({ data:{ id, userId, method: parsed.data.method, summaryJson: '' } });
+  await calcGainsQueue.add('calc', { sessionId:id, userId, method: parsed.data.method }, { attempts:3, backoff:{ type:'exponential', delay:5000 } });
+  audit(userId, 'enqueue_session', { sessionId:id, method: parsed.data.method });
+  res.status(202).json({ id, status:'queued' });
+});
+
+app.get('/api/what-if/sessions/:id/status', authMiddleware, async (req:any,res)=>{
+  const sess = await prisma.whatIfSession.findUnique({ where:{ id:req.params.id } });
+  if(!sess || sess.userId!==req.userId) return res.status(404).json({error:'Not found'});
+  const ready = !!sess.summaryJson;
+  res.json({ status: ready? 'ready':'queued' });
+});
+
+(app as any).ws('/ws/sandbox', (ws:any, req:any)=>{
+  const sessionId = req.query.sessionId as string;
+  if(!sessionId){ ws.close(); return; }
+  const channel = `sandbox:${sessionId}`;
+  const handler = (msgChannel:string,msg:string)=>{
+    if(msgChannel===channel){ ws.send(JSON.stringify({ summary: JSON.parse(msg) as GainSummary })); }
+  };
+  redisSub.subscribe(channel);
+  redisSub.on('message', handler);
+  ws.on('close',()=>{
+    redisSub.off('message', handler);
+    redisSub.unsubscribe(channel);
+  });
 });
 
 function randomCode() {

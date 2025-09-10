@@ -23,12 +23,16 @@
   "dependencies": {
     "@prisma/client": "^6.14.0",
     "bcryptjs": "^3.0.2",
+    "bullmq": "^5.58.5",
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "express-rate-limit": "^8.0.1",
+    "express-ws": "^5.0.2",
+    "ioredis": "^5.7.0",
     "jsonwebtoken": "^9.0.2",
     "prisma": "^6.14.0",
     "speakeasy": "^2.0.0",
+    "ws": "^8.18.3",
     "zod": "^4.1.1"
   },
   "devDependencies": {
