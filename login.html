@@ -7,13 +7,15 @@
   <link rel="stylesheet" href="style.css">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
   <script>
-    const API_BASE = 'http://localhost:4000';
-    function generateId(prefix='id'){ return `${prefix}_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}`; }
-    function getSessions(u){ return []; }
-    function setSessions(u,s){}
-    function getSecurity(u){ return { twoFAEnabled: true }; }
     function showError(msg){ const el=document.getElementById('errorBox'); el.textContent=msg; el.style.display='block'; }
     function clearError(){ const el=document.getElementById('errorBox'); el.style.display='none'; el.textContent=''; }
+
+    // Demo users data
+    const demoUsers = {
+      'aaron': { password: 'password', role: 'employee', fullName: 'Aaron Employee' },
+      'hr1': { password: 'password', role: 'hr', fullName: 'Harper HR' },
+      'admin': { password: 'admin123', role: 'admin', fullName: 'Alex Admin' }
+    };
 
     function onDomReady(){
       document.getElementById('loginForm').addEventListener('submit', onLoginSubmit);
@@ -28,77 +30,88 @@
         document.getElementById('recoveryCode').parentElement.style.display='none';
         document.getElementById('twoFABadge').textContent='Enter 6-digit code';
       });
-      // Connectivity check
-      pingHealth();
       // Role switcher
       initRoleSwitcher();
+      // File-based autofill
+      initFileUpload();
+      // Update API status
+      document.getElementById('apiStatus').textContent='Frontend Only Mode';
+      document.getElementById('apiStatus').className='status-badge warning';
     }
 
     let pendingUser = null;
     let rememberMe = false;
 
-    async function onLoginSubmit(e){
+    function onLoginSubmit(e){
       e.preventDefault(); clearError();
       const username=(document.getElementById('username').value||'').trim();
       const password=document.getElementById('password').value||'';
       rememberMe=document.getElementById('remember').checked;
       if(!username || !password){ showError('Enter username and password.'); return; }
-      // Call backend
-      try{
-        const resp = await fetch(`${API_BASE}/api/auth/login`, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ username, password, userAgent: navigator.userAgent }) });
-        if(!resp.ok){ showError('Invalid username or password.'); return; }
-        const data = await resp.json();
-        pendingUser=username;
-        if(data.twoFARequired){
-          document.getElementById('loginForm').style.display='none';
-          document.getElementById('twoFAStep').style.display='block';
-          document.getElementById('twoFAUser').textContent=username;
-          document.getElementById('recoveryCode').parentElement.style.display='none';
-          document.getElementById('twoFACode').focus();
-        } else {
-          finalizeLoginWithToken(username, data);
-        }
-      }catch(err){
-        showError('Network error. Is the API running at http://localhost:4000?');
+      
+      // Check demo users
+      const user = demoUsers[username];
+      if(!user || user.password !== password){
+        showError('Invalid username or password.');
+        return;
       }
+
+      // Simulate 2FA check (all demo users have 2FA enabled)
+      pendingUser = username;
+      document.getElementById('loginForm').style.display='none';
+      document.getElementById('twoFAStep').style.display='block';
+      document.getElementById('twoFAUser').textContent=username;
+      document.getElementById('recoveryCode').parentElement.style.display='none';
+      document.getElementById('twoFACode').focus();
     }
 
-    async function onTwoFASubmit(e){
+    function onTwoFASubmit(e){
       e.preventDefault(); clearError();
-      const username=pendingUser; if(!username){ showError('Session expired. Try again.'); return; }
+      const username=pendingUser; 
+      if(!username){ showError('Session expired. Try again.'); return; }
+      
       const code=(document.getElementById('twoFACode').value||'').trim();
       const rec=(document.getElementById('recoveryCode').value||'').trim();
-      try{
-        const resp = await fetch(`${API_BASE}/api/auth/2fa`, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ username, code: code || undefined, recoveryCode: rec || undefined, userAgent: navigator.userAgent }) });
-        if(!resp.ok){ showError('Invalid 2FA verification.'); return; }
-        const data = await resp.json();
-        finalizeLoginWithToken(username, data);
-      }catch(err){ showError('Network error. Try again.'); }
+      
+      // Simple validation - accept any 6-digit code or recovery code for demo
+      let valid = false;
+      if(code && code.length === 6 && /^\d{6}$/.test(code)){
+        valid = true;
+      } else if(rec && rec.length === 9 && rec.includes('-')){
+        valid = true;
+      }
+      
+      if(!valid){
+        showError('Invalid 2FA verification.');
+        return;
+      }
+
+      // Complete login
+      const user = demoUsers[username];
+      finalizeLogin(username, user);
     }
 
-    function finalizeLoginWithToken(username, data){
-      const { token, sessionId, user } = data;
-      if(!token){ showError('Login failed.'); return; }
-      localStorage.setItem('authToken', token);
-      localStorage.setItem('userRole', user?.role || 'employee');
-      localStorage.setItem('username', user?.username || username);
-      if(sessionId) localStorage.setItem('currentSessionId', sessionId);
+    function finalizeLogin(username, user){
+      // Store user data in localStorage
+      localStorage.setItem('userRole', user.role);
+      localStorage.setItem('username', username);
+      localStorage.setItem('fullName', user.fullName);
       if(rememberMe){ localStorage.setItem('rememberMe', '1'); } else { localStorage.removeItem('rememberMe'); }
-      const key=`loginHistory_${username}`; const ua=navigator.userAgent; const now=new Date().toISOString();
-      const hist=JSON.parse(localStorage.getItem(key) || '[]'); hist.unshift({ timestamp: now, ipAddress: 'Unknown', device: ua, status: 'Success', location: 'Unknown' }); localStorage.setItem(key, JSON.stringify(hist.slice(0,50)));
-      const role = (user?.role||'employee').toLowerCase();
-      if(role === 'hr' || role === 'admin'){ window.location.href='hr-dashboard.html'; } else { window.location.href='employee-profile.html'; }
-    }
-
-    async function pingHealth(){
-      try{
-        const r = await fetch(`${API_BASE}/health`, { method:'GET' });
-        if(!r.ok) throw new Error('bad');
-        document.getElementById('apiStatus').textContent='API: Online';
-        document.getElementById('apiStatus').className='status-badge success';
-      }catch{
-        document.getElementById('apiStatus').textContent='API: Offline';
-        document.getElementById('apiStatus').className='status-badge danger';
+      
+      // Store login history
+      const key=`loginHistory_${username}`; 
+      const ua=navigator.userAgent; 
+      const now=new Date().toISOString();
+      const hist=JSON.parse(localStorage.getItem(key) || '[]'); 
+      hist.unshift({ timestamp: now, ipAddress: 'Demo', device: ua, status: 'Success', location: 'Demo' }); 
+      localStorage.setItem(key, JSON.stringify(hist.slice(0,50)));
+      
+      // Redirect based on role
+      const role = user.role.toLowerCase();
+      if(role === 'hr' || role === 'admin'){ 
+        window.location.href='hr-dashboard.html'; 
+      } else { 
+        window.location.href='employee-profile.html'; 
       }
     }
 
@@ -112,6 +125,29 @@
         else if(v==='admin'){ document.getElementById('username').value='admin'; document.getElementById('password').value='admin123'; }
         else { document.getElementById('username').value=''; document.getElementById('password').value=''; }
       });
+    }
+
+    function initFileUpload(){
+      const fileInput = document.getElementById('loginFile');
+      if(fileInput){
+        fileInput.addEventListener('change', async (e)=>{
+          const file = e.target.files?.[0];
+          if(!file) return;
+          try{
+            const txt = await file.text();
+            const obj = JSON.parse(txt);
+            const { username, password, role } = obj;
+            if(username) document.getElementById('username').value = username;
+            if(password) document.getElementById('password').value = password;
+            if(role){
+              const sel = document.getElementById('roleSelect');
+              if(sel){ sel.value = role; sel.dispatchEvent(new Event('change')); }
+            }
+          }catch(err){
+            alert('Invalid JSON file. Expected {"username":"","password":"","role":""}');
+          }
+        });
+      }
     }
 
     document.addEventListener('DOMContentLoaded', onDomReady);
@@ -129,6 +165,10 @@
 
       <!-- Step 1: Credentials -->
       <form id="loginForm">
+        <div class="form-group">
+          <label for="loginFile">Load credentials file</label>
+          <input type="file" id="loginFile" accept="application/json">
+        </div>
         <div class="form-group">
           <label for="roleSelect">Quick role</label>
           <select id="roleSelect">
@@ -184,4 +224,3 @@
   </div>
 </body>
 </html>
-
