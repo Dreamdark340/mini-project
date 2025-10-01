@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>System Settings - Payroll Management</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <script src="navigation-enhancer.js"></script>
+  <script>
+    function logout(){ localStorage.removeItem('authToken'); localStorage.removeItem('userRole'); localStorage.removeItem('username'); localStorage.removeItem('fullName'); window.location.href='login.html'; }
+    function checkAuth(){ const t=localStorage.getItem('authToken'); const r=localStorage.getItem('userRole'); const u=localStorage.getItem('username'); if(!t||!r||!u){ window.location.href='login.html'; return; } if(r!=='admin'){ alert('Admin access required'); window.location.href='employee-dashboard.html'; return; } document.getElementById('currentUser').innerHTML=`<span>${localStorage.getItem('fullName') || u}</span><span class="role-badge">ADMIN</span>`; document.body.classList.add('admin-theme'); loadSystemSettings(); }
+    
+    let systemSettings = {};
+    
+    function loadSystemSettings() {
+        loadGeneralSettings();
+        loadSecuritySettings();
+        loadNotificationSettings();
+        loadBackupSettings();
+        loadAPISettings();
+        loadCryptoTraderSettings();
+    }
+    
+    function loadGeneralSettings() {
+        systemSettings.general = JSON.parse(localStorage.getItem('systemSettings_general') || JSON.stringify({
+            companyName: 'PayrollPro Inc.',
+            timezone: 'UTC',
+            currency: 'USD',
+            dateFormat: 'MM/DD/YYYY',
+            language: 'en',
+            payrollCycle: 'bi-weekly',
+            autoLogout: 30,
+            maintenanceMode: false
+        }));
+        
+        displayGeneralSettings();
+    }
+    
+    function displayGeneralSettings() {
+        const settings = systemSettings.general;
+        
+        document.getElementById('companyName').value = settings.companyName;
+        document.getElementById('timezone').value = settings.timezone;
+        document.getElementById('currency').value = settings.currency;
+        document.getElementById('dateFormat').value = settings.dateFormat;
+        document.getElementById('language').value = settings.language;
+        document.getElementById('payrollCycle').value = settings.payrollCycle;
+        document.getElementById('autoLogout').value = settings.autoLogout;
+        document.getElementById('maintenanceMode').checked = settings.maintenanceMode;
+    }
+    
+    function saveGeneralSettings() {
+        const settings = {
+            companyName: document.getElementById('companyName').value,
+            timezone: document.getElementById('timezone').value,
+            currency: document.getElementById('currency').value,
+            dateFormat: document.getElementById('dateFormat').value,
+            language: document.getElementById('language').value,
+            payrollCycle: document.getElementById('payrollCycle').value,
+            autoLogout: parseInt(document.getElementById('autoLogout').value),
+            maintenanceMode: document.getElementById('maintenanceMode').checked
+        };
+        
+        localStorage.setItem('systemSettings_general', JSON.stringify(settings));
+        systemSettings.general = settings;
+        
+        showNotification('General settings saved successfully!', 'success');
+    }
+    
+    function loadSecuritySettings() {
+        systemSettings.security = JSON.parse(localStorage.getItem('systemSettings_security') || JSON.stringify({
+            require2FA: true,
+            passwordMinLength: 8,
+            passwordRequireSpecial: true,
+            sessionTimeout: 60,
+            maxLoginAttempts: 5,
+            lockoutDuration: 15,
+            enableAuditLogging: true,
+            ipWhitelist: [],
+            enableCryptoTraderRole: true
+        }));
+        
+        displaySecuritySettings();
+    }
+    
+    function displaySecuritySettings() {
+        const settings = systemSettings.security;
+        
+        document.getElementById('require2FA').checked = settings.require2FA;
+        document.getElementById('passwordMinLength').value = settings.passwordMinLength;
+        document.getElementById('passwordRequireSpecial').checked = settings.passwordRequireSpecial;
+        document.getElementById('sessionTimeout').value = settings.sessionTimeout;
+        document.getElementById('maxLoginAttempts').value = settings.maxLoginAttempts;
+        document.getElementById('lockoutDuration').value = settings.lockoutDuration;
+        document.getElementById('enableAuditLogging').checked = settings.enableAuditLogging;
+        document.getElementById('enableCryptoTraderRole').checked = settings.enableCryptoTraderRole;
+    }
+    
+    function saveSecuritySettings() {
+        const settings = {
+            require2FA: document.getElementById('require2FA').checked,
+            passwordMinLength: parseInt(document.getElementById('passwordMinLength').value),
+            passwordRequireSpecial: document.getElementById('passwordRequireSpecial').checked,
+            sessionTimeout: parseInt(document.getElementById('sessionTimeout').value),
+            maxLoginAttempts: parseInt(document.getElementById('maxLoginAttempts').value),
+            lockoutDuration: parseInt(document.getElementById('lockoutDuration').value),
+            enableAuditLogging: document.getElementById('enableAuditLogging').checked,
+            ipWhitelist: systemSettings.security.ipWhitelist,
+            enableCryptoTraderRole: document.getElementById('enableCryptoTraderRole').checked
+        };
+        
+        localStorage.setItem('systemSettings_security', JSON.stringify(settings));
+        systemSettings.security = settings;
+        
+        showNotification('Security settings saved successfully!', 'success');
+    }
+    
+    function loadNotificationSettings() {
+        systemSettings.notifications = JSON.parse(localStorage.getItem('systemSettings_notifications') || JSON.stringify({
+            emailNotifications: true,
+            smsNotifications: false,
+            pushNotifications: true,
+            payrollReminders: true,
+            securityAlerts: true,
+            systemUpdates: true,
+            maintenanceAlerts: true,
+            emailProvider: 'smtp',
+            smsProvider: 'twilio'
+        }));
+        
+        displayNotificationSettings();
+    }
+    
+    function displayNotificationSettings() {
+        const settings = systemSettings.notifications;
+        
+        document.getElementById('emailNotifications').checked = settings.emailNotifications;
+        document.getElementById('smsNotifications').checked = settings.smsNotifications;
+        document.getElementById('pushNotifications').checked = settings.pushNotifications;
+        document.getElementById('payrollReminders').checked = settings.payrollReminders;
+        document.getElementById('securityAlerts').checked = settings.securityAlerts;
+        document.getElementById('systemUpdates').checked = settings.systemUpdates;
+        document.getElementById('maintenanceAlerts').checked = settings.maintenanceAlerts;
+        document.getElementById('emailProvider').value = settings.emailProvider;
+        document.getElementById('smsProvider').value = settings.smsProvider;
+    }
+    
+    function saveNotificationSettings() {
+        const settings = {
+            emailNotifications: document.getElementById('emailNotifications').checked,
+            smsNotifications: document.getElementById('smsNotifications').checked,
+            pushNotifications: document.getElementById('pushNotifications').checked,
+            payrollReminders: document.getElementById('payrollReminders').checked,
+            securityAlerts: document.getElementById('securityAlerts').checked,
+            systemUpdates: document.getElementById('systemUpdates').checked,
+            maintenanceAlerts: document.getElementById('maintenanceAlerts').checked,
+            emailProvider: document.getElementById('emailProvider').value,
+            smsProvider: document.getElementById('smsProvider').value
+        };
+        
+        localStorage.setItem('systemSettings_notifications', JSON.stringify(settings));
+        systemSettings.notifications = settings;
+        
+        showNotification('Notification settings saved successfully!', 'success');
+    }
+    
+    function loadBackupSettings() {
+        systemSettings.backup = JSON.parse(localStorage.getItem('systemSettings_backup') || JSON.stringify({
+            autoBackup: true,
+            backupFrequency: 'daily',
+            backupRetention: 30,
+            backupLocation: 'cloud',
+            encryptionEnabled: true,
+            lastBackup: new Date().toISOString(),
+            nextBackup: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+        }));
+        
+        displayBackupSettings();
+    }
+    
+    function displayBackupSettings() {
+        const settings = systemSettings.backup;
+        
+        document.getElementById('autoBackup').checked = settings.autoBackup;
+        document.getElementById('backupFrequency').value = settings.backupFrequency;
+        document.getElementById('backupRetention').value = settings.backupRetention;
+        document.getElementById('backupLocation').value = settings.backupLocation;
+        document.getElementById('encryptionEnabled').checked = settings.encryptionEnabled;
+        
+        document.getElementById('lastBackup').textContent = new Date(settings.lastBackup).toLocaleString();
+        document.getElementById('nextBackup').textContent = new Date(settings.nextBackup).toLocaleString();
+    }
+    
+    function saveBackupSettings() {
+        const settings = {
+            autoBackup: document.getElementById('autoBackup').checked,
+            backupFrequency: document.getElementById('backupFrequency').value,
+            backupRetention: parseInt(document.getElementById('backupRetention').value),
+            backupLocation: document.getElementById('backupLocation').value,
+            encryptionEnabled: document.getElementById('encryptionEnabled').checked,
+            lastBackup: systemSettings.backup.lastBackup,
+            nextBackup: systemSettings.backup.nextBackup
+        };
+        
+        localStorage.setItem('systemSettings_backup', JSON.stringify(settings));
+        systemSettings.backup = settings;
+        
+        showNotification('Backup settings saved successfully!', 'success');
+    }
+    
+    function loadAPISettings() {
+        systemSettings.api = JSON.parse(localStorage.getItem('systemSettings_api') || JSON.stringify({
+            apiEnabled: true,
+            rateLimit: 1000,
+            apiKeys: [],
+            webhooks: [],
+            integrations: {
+                slack: { enabled: false, webhook: '' },
+                discord: { enabled: false, webhook: '' },
+                teams: { enabled: false, webhook: '' }
+            }
+        }));
+        
+        displayAPISettings();
+    }
+    
+    function displayAPISettings() {
+        const settings = systemSettings.api;
+        
+        document.getElementById('apiEnabled').checked = settings.apiEnabled;
+        document.getElementById('rateLimit').value = settings.rateLimit;
+        document.getElementById('slackEnabled').checked = settings.integrations.slack.enabled;
+        document.getElementById('slackWebhook').value = settings.integrations.slack.webhook;
+        document.getElementById('discordEnabled').checked = settings.integrations.discord.enabled;
+        document.getElementById('discordWebhook').value = settings.integrations.discord.webhook;
+        document.getElementById('teamsEnabled').checked = settings.integrations.teams.enabled;
+        document.getElementById('teamsWebhook').value = settings.integrations.teams.webhook;
+    }
+    
+    function saveAPISettings() {
+        const settings = {
+            apiEnabled: document.getElementById('apiEnabled').checked,
+            rateLimit: parseInt(document.getElementById('rateLimit').value),
+            apiKeys: systemSettings.api.apiKeys,
+            webhooks: systemSettings.api.webhooks,
+            integrations: {
+                slack: {
+                    enabled: document.getElementById('slackEnabled').checked,
+                    webhook: document.getElementById('slackWebhook').value
+                },
+                discord: {
+                    enabled: document.getElementById('discordEnabled').checked,
+                    webhook: document.getElementById('discordWebhook').value
+                },
+                teams: {
+                    enabled: document.getElementById('teamsEnabled').checked,
+                    webhook: document.getElementById('teamsWebhook').value
+                }
+            }
+        };
+        
+        localStorage.setItem('systemSettings_api', JSON.stringify(settings));
+        systemSettings.api = settings;
+        
+        showNotification('API settings saved successfully!', 'success');
+    }
+    
+    function loadCryptoTraderSettings() {
+        systemSettings.crypto = JSON.parse(localStorage.getItem('systemSettings_crypto') || JSON.stringify({
+            cryptoEnabled: true,
+            supportedCurrencies: ['BTC', 'ETH', 'USDT', 'USDC', 'BNB'],
+            exchangeRates: 'live',
+            walletProvider: 'metamask',
+            transactionFees: 0.001,
+            maxDailyLimit: 100000,
+            requireApproval: true,
+            multiSigRequired: true
+        }));
+        
+        displayCryptoTraderSettings();
+    }
+    
+    function displayCryptoTraderSettings() {
+        const settings = systemSettings.crypto;
+        
+        document.getElementById('cryptoEnabled').checked = settings.cryptoEnabled;
+        document.getElementById('exchangeRates').value = settings.exchangeRates;
+        document.getElementById('walletProvider').value = settings.walletProvider;
+        document.getElementById('transactionFees').value = settings.transactionFees;
+        document.getElementById('maxDailyLimit').value = settings.maxDailyLimit;
+        document.getElementById('requireApproval').checked = settings.requireApproval;
+        document.getElementById('multiSigRequired').checked = settings.multiSigRequired;
+    }
+    
+    function saveCryptoTraderSettings() {
+        const settings = {
+            cryptoEnabled: document.getElementById('cryptoEnabled').checked,
+            supportedCurrencies: systemSettings.crypto.supportedCurrencies,
+            exchangeRates: document.getElementById('exchangeRates').value,
+            walletProvider: document.getElementById('walletProvider').value,
+            transactionFees: parseFloat(document.getElementById('transactionFees').value),
+            maxDailyLimit: parseFloat(document.getElementById('maxDailyLimit').value),
+            requireApproval: document.getElementById('requireApproval').checked,
+            multiSigRequired: document.getElementById('multiSigRequired').checked
+        };
+        
+        localStorage.setItem('systemSettings_crypto', JSON.stringify(settings));
+        systemSettings.crypto = settings;
+        
+        showNotification('Crypto trader settings saved successfully!', 'success');
+    }
+    
+    function performBackup() {
+        const button = document.getElementById('backupNowBtn');
+        button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Backing up...';
+        button.disabled = true;
+        
+        // Simulate backup process
+        setTimeout(() => {
+            const now = new Date().toISOString();
+            systemSettings.backup.lastBackup = now;
+            systemSettings.backup.nextBackup = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+            
+            localStorage.setItem('systemSettings_backup', JSON.stringify(systemSettings.backup));
+            displayBackupSettings();
+            
+            button.innerHTML = '<i class="fas fa-download"></i> Backup Now';
+            button.disabled = false;
+            
+            showNotification('Backup completed successfully!', 'success');
+        }, 3000);
+    }
+    
+    function generateAPIKey() {
+        const apiKey = 'pk_' + Math.random().toString(36).substr(2, 32);
+        systemSettings.api.apiKeys.push({
+            key: apiKey,
+            name: `API Key ${systemSettings.api.apiKeys.length + 1}`,
+            created: new Date().toISOString(),
+            active: true
+        });
+        
+        localStorage.setItem('systemSettings_api', JSON.stringify(systemSettings.api));
+        showNotification('New API key generated: ' + apiKey, 'success');
+    }
+    
+    function showNotification(message, type = 'info') {
+        const notification = document.createElement('div');
+        notification.className = `notification ${type}`;
+        notification.innerHTML = `
+            <div class="notification-content">
+                <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle'}"></i>
+                <span>${message}</span>
+            </div>
+        `;
+        
+        document.body.appendChild(notification);
+        
+        setTimeout(() => notification.classList.add('show'), 100);
+        
+        setTimeout(() => {
+            notification.classList.remove('show');
+            setTimeout(() => notification.remove(), 300);
+        }, 3000);
+    }
+    
+    document.addEventListener('DOMContentLoaded', checkAuth);
+  </script>
+  <style>
+    .settings-section {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 30px;
+      margin-bottom: 30px;
+      box-shadow: var(--shadow);
+    }
+    
+    .settings-section h3 {
+      margin: 0 0 20px;
+      color: var(--text);
+      border-bottom: 2px solid var(--primary);
+      padding-bottom: 10px;
+    }
+    
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+    
+    .form-group {
+      margin-bottom: 20px;
+    }
+    
+    .form-group label {
+      display: block;
+      margin-bottom: 6px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    
+    .form-group input,
+    .form-group select {
+      width: 100%;
+      padding: 12px 16px;
+      border: 2px solid #e5e7eb;
+      border-radius: 8px;
+      font-size: 1rem;
+      transition: all 0.2s ease;
+    }
+    
+    .form-group input:focus,
+    .form-group select:focus {
+      outline: none;
+      border-color: #3b82f6;
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    }
+    
+    .checkbox-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 15px;
+    }
+    
+    .checkbox-group input[type="checkbox"] {
+      width: auto;
+      margin: 0;
+    }
+    
+    .checkbox-group label {
+      margin: 0;
+      font-weight: 500;
+    }
+    
+    .backup-info {
+      background: #f8fafc;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 20px;
+      margin: 20px 0;
+    }
+    
+    .backup-info h4 {
+      margin: 0 0 15px;
+      color: var(--text);
+    }
+    
+    .backup-info-item {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 10px;
+      padding: 8px 0;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    
+    .backup-info-item:last-child {
+      border-bottom: none;
+    }
+    
+    .backup-info-label {
+      font-weight: 600;
+      color: var(--muted);
+    }
+    
+    .backup-info-value {
+      color: var(--text);
+    }
+    
+    .notification {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: white;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 15px 20px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      z-index: 1000;
+      opacity: 0;
+      transform: translateX(100%);
+      transition: all 0.3s ease;
+    }
+    
+    .notification.show {
+      opacity: 1;
+      transform: translateX(0);
+    }
+    
+    .notification.success {
+      border-color: #10b981;
+      background: #f0fdf4;
+    }
+    
+    .notification.error {
+      border-color: #ef4444;
+      background: #fef2f2;
+    }
+    
+    .notification-content {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    
+    .notification.success .notification-content i {
+      color: #10b981;
+    }
+    
+    .notification.error .notification-content i {
+      color: #ef4444;
+    }
+    
+    .admin-theme .settings-section h3 {
+      border-color: #f59e0b;
+    }
+    
+    @media (max-width: 768px) {
+      .form-grid {
+        grid-template-columns: 1fr;
+      }
+      
+      .backup-info-item {
+        flex-direction: column;
+        gap: 5px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="header-content">
+      <h1><i class="fas fa-cogs"></i> System Settings</h1>
+      <div class="user-info">
+        <span id="currentUser">Loading...</span>
+        <button onclick="logout()" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</button>
+      </div>
+    </div>
+  </header>
+  
+  <div class="container">
+    <nav class="sidebar">
+      <div class="sidebar-header"><i class="fas fa-user-shield"></i><span>Admin Portal</span></div>
+      <ul class="nav-links">
+        <li><a href="hr-dashboard.html"><i class="fas fa-users-cog"></i><span>Dashboard</span></a></li>
+        <li><a href="employee-directory.html"><i class="fas fa-users"></i><span>User Management</span></a></li>
+        <li><a href="audit-compliance.html"><i class="fas fa-clipboard-check"></i><span>Audit Logs</span></a></li>
+        <li class="active"><a href="system-settings.html"><i class="fas fa-cogs"></i><span>System Settings</span></a></li>
+        <li><a href="crypto-payroll.html"><i class="fas fa-coins"></i><span>Crypto Operations</span></a></li>
+        <li><a href="enhanced-2fa.html"><i class="fas fa-shield-alt"></i><span>Security Center</span></a></li>
+      </ul>
+    </nav>
+    
+    <main class="main-content">
+      <div class="page-header">
+        <h2><i class="fas fa-cogs"></i> System Configuration</h2>
+        <p>Configure system-wide settings and security policies.</p>
+      </div>
+      
+      <!-- General Settings -->
+      <div class="settings-section">
+        <h3><i class="fas fa-globe"></i> General Settings</h3>
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="companyName">Company Name</label>
+            <input type="text" id="companyName" placeholder="Enter company name">
+          </div>
+          <div class="form-group">
+            <label for="timezone">Timezone</label>
+            <select id="timezone">
+              <option value="UTC">UTC</option>
+              <option value="America/New_York">Eastern Time</option>
+              <option value="America/Chicago">Central Time</option>
+              <option value="America/Denver">Mountain Time</option>
+              <option value="America/Los_Angeles">Pacific Time</option>
+              <option value="Europe/London">London</option>
+              <option value="Asia/Kolkata">India Standard Time</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="currency">Default Currency</label>
+            <select id="currency">
+              <option value="USD">USD - US Dollar</option>
+              <option value="EUR">EUR - Euro</option>
+              <option value="GBP">GBP - British Pound</option>
+              <option value="INR">INR - Indian Rupee</option>
+              <option value="CAD">CAD - Canadian Dollar</option>
+              <option value="AUD">AUD - Australian Dollar</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="dateFormat">Date Format</label>
+            <select id="dateFormat">
+              <option value="MM/DD/YYYY">MM/DD/YYYY</option>
+              <option value="DD/MM/YYYY">DD/MM/YYYY</option>
+              <option value="YYYY-MM-DD">YYYY-MM-DD</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="language">Language</label>
+            <select id="language">
+              <option value="en">English</option>
+              <option value="es">Spanish</option>
+              <option value="fr">French</option>
+              <option value="de">German</option>
+              <option value="hi">Hindi</option>
+              <option value="zh">Chinese</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="payrollCycle">Payroll Cycle</label>
+            <select id="payrollCycle">
+              <option value="weekly">Weekly</option>
+              <option value="bi-weekly">Bi-weekly</option>
+              <option value="monthly">Monthly</option>
+              <option value="quarterly">Quarterly</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="autoLogout">Auto Logout (minutes)</label>
+          <input type="number" id="autoLogout" min="5" max="480" placeholder="30">
+        </div>
+        <div class="checkbox-group">
+          <input type="checkbox" id="maintenanceMode">
+          <label for="maintenanceMode">Enable Maintenance Mode</label>
+        </div>
+        <button onclick="saveGeneralSettings()" class="primary-btn">
+          <i class="fas fa-save"></i> Save General Settings
+        </button>
+      </div>
+      
+      <!-- Security Settings -->
+      <div class="settings-section">
+        <h3><i class="fas fa-shield-alt"></i> Security Settings</h3>
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="passwordMinLength">Minimum Password Length</label>
+            <input type="number" id="passwordMinLength" min="6" max="32" placeholder="8">
+          </div>
+          <div class="form-group">
+            <label for="sessionTimeout">Session Timeout (minutes)</label>
+            <input type="number" id="sessionTimeout" min="5" max="480" placeholder="60">
+          </div>
+          <div class="form-group">
+            <label for="maxLoginAttempts">Max Login Attempts</label>
+            <input type="number" id="maxLoginAttempts" min="3" max="10" placeholder="5">
+          </div>
+          <div class="form-group">
+            <label for="lockoutDuration">Lockout Duration (minutes)</label>
+            <input type="number" id="lockoutDuration" min="5" max="60" placeholder="15">
+          </div>
+        </div>
+        <div class="checkbox-group">
+          <input type="checkbox" id="require2FA">
+          <label for="require2FA">Require 2FA for All Users</label>
+        </div>
+        <div class="checkbox-group">
+          <input type="checkbox" id="passwordRequireSpecial">
+          <label for="passwordRequireSpecial">Require Special Characters in Passwords</label>
+        </div>
+        <div class="checkbox-group">
+          <input type="checkbox" id="enableAuditLogging">
+          <label for="enableAuditLogging">Enable Audit Logging</label>
+        </div>
+        <div class="checkbox-group">
+          <input type="checkbox" id="enableCryptoTraderRole">
+          <label for="enableCryptoTraderRole">Enable Crypto Trader Role</label>
+        </div>
+        <button onclick="saveSecuritySettings()" class="primary-btn">
+          <i class="fas fa-save"></i> Save Security Settings
+        </button>
+      </div>
+      
+      <!-- Crypto Trader Settings -->
+      <div class="settings-section">
+        <h3><i class="fas fa-coins"></i> Crypto Trader Settings</h3>
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="exchangeRates">Exchange Rate Source</label>
+            <select id="exchangeRates">
+              <option value="live">Live Rates</option>
+              <option value="manual">Manual Entry</option>
+              <option value="scheduled">Scheduled Updates</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="walletProvider">Wallet Provider</label>
+            <select id="walletProvider">
+              <option value="metamask">MetaMask</option>
+              <option value="trust">Trust Wallet</option>
+              <option value="coinbase">Coinbase Wallet</option>
+              <option value="ledger">Ledger</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="transactionFees">Transaction Fees (%)</label>
+            <input type="number" id="transactionFees" step="0.001" min="0" max="10" placeholder="0.001">
+          </div>
+          <div class="form-group">
+            <label for="maxDailyLimit">Max Daily Limit ($)</label>
+            <input type="number" id="maxDailyLimit" min="1000" max="1000000" placeholder="100000">
+          </div>
+        </div>
+        <div class="checkbox-group">
+          <input type="checkbox" id="cryptoEnabled">
+          <label for="cryptoEnabled">Enable Crypto Operations</label>
+        </div>
+        <div class="checkbox-group">
+          <input type="checkbox" id="requireApproval">
+          <label for="requireApproval">Require Approval for Large Transactions</label>
+        </div>
+        <div class="checkbox-group">
+          <input type="checkbox" id="multiSigRequired">
+          <label for="multiSigRequired">Require Multi-Signature for Crypto Operations</label>
+        </div>
+        <button onclick="saveCryptoTraderSettings()" class="primary-btn">
+          <i class="fas fa-save"></i> Save Crypto Settings
+        </button>
+      </div>
+      
+      <!-- Backup Settings -->
+      <div class="settings-section">
+        <h3><i class="fas fa-database"></i> Backup & Recovery</h3>
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="backupFrequency">Backup Frequency</label>
+            <select id="backupFrequency">
+              <option value="hourly">Hourly</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="backupRetention">Retention Period (days)</label>
+            <input type="number" id="backupRetention" min="7" max="365" placeholder="30">
+          </div>
+          <div class="form-group">
+            <label for="backupLocation">Backup Location</label>
+            <select id="backupLocation">
+              <option value="local">Local Storage</option>
+              <option value="cloud">Cloud Storage</option>
+              <option value="external">External Drive</option>
+            </select>
+          </div>
+        </div>
+        <div class="checkbox-group">
+          <input type="checkbox" id="autoBackup">
+          <label for="autoBackup">Enable Automatic Backups</label>
+        </div>
+        <div class="checkbox-group">
+          <input type="checkbox" id="encryptionEnabled">
+          <label for="encryptionEnabled">Enable Backup Encryption</label>
+        </div>
+        
+        <div class="backup-info">
+          <h4>Backup Information</h4>
+          <div class="backup-info-item">
+            <span class="backup-info-label">Last Backup:</span>
+            <span class="backup-info-value" id="lastBackup">Never</span>
+          </div>
+          <div class="backup-info-item">
+            <span class="backup-info-label">Next Scheduled Backup:</span>
+            <span class="backup-info-value" id="nextBackup">Not scheduled</span>
+          </div>
+        </div>
+        
+        <div style="display: flex; gap: 15px;">
+          <button onclick="saveBackupSettings()" class="primary-btn">
+            <i class="fas fa-save"></i> Save Backup Settings
+          </button>
+          <button onclick="performBackup()" id="backupNowBtn" class="secondary-btn">
+            <i class="fas fa-download"></i> Backup Now
+          </button>
+        </div>
+      </div>
+    </main>
+  </div>
+  
+  <footer><p>&copy; 2025 PayrollPro by Aaron | System Settings</p></footer>
+</body>
+</html>
