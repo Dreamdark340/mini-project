@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Achievements & Rewards - Payroll Management</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <script>
+    function logout(){ localStorage.removeItem('authToken'); localStorage.removeItem('userRole'); localStorage.removeItem('username'); localStorage.removeItem('fullName'); window.location.href='login.html'; }
+    function checkAuth(){ const t=localStorage.getItem('authToken'); const r=localStorage.getItem('userRole'); const u=localStorage.getItem('username'); if(!t||!r||!u){ window.location.href='login.html'; return; } document.getElementById('currentUser').innerHTML=`<span>${localStorage.getItem('fullName') || u}</span><span class="role-badge">${r.toUpperCase()}</span>`; document.body.classList.add('employee-theme'); loadAchievements(); }
+    
+    function loadAchievements() {
+        const username = localStorage.getItem('username');
+        loadUserStats(username);
+        loadAchievementsList(username);
+        loadLeaderboard();
+        checkAndAwardAchievements(username);
+    }
+    
+    function loadUserStats(username) {
+        const stats = getUserStats(username);
+        const xp = calculateTotalXP(stats);
+        const level = calculateLevel(xp);
+        const nextLevelXP = getNextLevelXP(level);
+        const progress = ((xp - getLevelXP(level)) / (nextLevelXP - getLevelXP(level))) * 100;
+        
+        document.getElementById('userLevel').textContent = level;
+        document.getElementById('userXP').textContent = xp.toLocaleString();
+        document.getElementById('nextLevelProgress').style.width = `${progress}%`;
+        document.getElementById('nextLevelXP').textContent = `${nextLevelXP - xp} XP to next level`;
+        
+        // Update rank
+        const rank = getCurrentRank(username);
+        document.getElementById('userRank').textContent = rank;
+    }
+    
+    function getUserStats(username) {
+        const stats = JSON.parse(localStorage.getItem(`userStats_${username}`) || '{}');
+        if (Object.keys(stats).length === 0) {
+            const demoStats = {
+                loginStreak: 5,
+                timeTracked: 120, // hours
+                reportsGenerated: 8,
+                profileUpdates: 3,
+                leaveRequests: 2,
+                expenseClaims: 4,
+                performanceReviews: 1,
+                perfectAttendance: 12, // weeks
+                onTimeLogins: 45,
+                goalsCompleted: 6,
+                lastLogin: new Date().toISOString(),
+                totalLoginDays: 67,
+                consecutiveOnTime: 8
+            };
+            localStorage.setItem(`userStats_${username}`, JSON.stringify(demoStats));
+            return demoStats;
+        }
+        return stats;
+    }
+    
+    function calculateTotalXP(stats) {
+        return (
+            stats.loginStreak * 10 +
+            stats.timeTracked * 5 +
+            stats.reportsGenerated * 15 +
+            stats.profileUpdates * 5 +
+            stats.leaveRequests * 10 +
+            stats.expenseClaims * 12 +
+            stats.performanceReviews * 25 +
+            stats.perfectAttendance * 20 +
+            stats.onTimeLogins * 2 +
+            stats.goalsCompleted * 30 +
+            stats.totalLoginDays * 3 +
+            stats.consecutiveOnTime * 5
+        );
+    }
+    
+    function calculateLevel(xp) {
+        return Math.floor(Math.sqrt(xp / 100)) + 1;
+    }
+    
+    function getLevelXP(level) {
+        return Math.pow(level - 1, 2) * 100;
+    }
+    
+    function getNextLevelXP(level) {
+        return Math.pow(level, 2) * 100;
+    }
+    
+    function getCurrentRank(username) {
+        const allUsers = JSON.parse(localStorage.getItem('employeeDirectory') || '[]');
+        const userScores = allUsers.map(user => ({
+            username: user.username,
+            xp: calculateTotalXP(getUserStats(user.username))
+        })).sort((a, b) => b.xp - a.xp);
+        
+        const rank = userScores.findIndex(user => user.username === username) + 1;
+        return rank || 'Unranked';
+    }
+    
+    function loadAchievementsList(username) {
+        const achievements = getAllAchievements();
+        const userStats = getUserStats(username);
+        const earnedAchievements = JSON.parse(localStorage.getItem(`achievements_${username}`) || '[]');
+        
+        const achievementsContainer = document.getElementById('achievementsContainer');
+        
+        achievementsContainer.innerHTML = achievements.map(achievement => {
+            const isEarned = earnedAchievements.includes(achievement.id);
+            const progress = calculateAchievementProgress(achievement, userStats);
+            
+            return `
+                <div class="achievement-card ${isEarned ? 'earned' : ''}">
+                    <div class="achievement-icon">
+                        <i class="${achievement.icon}"></i>
+                        ${isEarned ? '<div class="earned-badge">✓</div>' : ''}
+                    </div>
+                    <div class="achievement-content">
+                        <h4>${achievement.title}</h4>
+                        <p>${achievement.description}</p>
+                        <div class="achievement-progress">
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: ${progress}%"></div>
+                            </div>
+                            <span class="progress-text">${progress}%</span>
+                        </div>
+                        <div class="achievement-reward">
+                            <i class="fas fa-star"></i> +${achievement.xpReward} XP
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+    
+    function getAllAchievements() {
+        return [
+            {
+                id: 'first_login',
+                title: 'Welcome Aboard!',
+                description: 'Complete your first login',
+                icon: 'fas fa-handshake',
+                xpReward: 50,
+                condition: (stats) => stats.totalLoginDays >= 1
+            },
+            {
+                id: 'login_streak_7',
+                title: 'Consistency Champion',
+                description: 'Maintain a 7-day login streak',
+                icon: 'fas fa-fire',
+                xpReward: 100,
+                condition: (stats) => stats.loginStreak >= 7
+            },
+            {
+                id: 'time_tracker',
+                title: 'Time Master',
+                description: 'Track 100+ hours of work time',
+                icon: 'fas fa-clock',
+                xpReward: 200,
+                condition: (stats) => stats.timeTracked >= 100
+            },
+            {
+                id: 'perfect_attendance',
+                title: 'Perfect Attendance',
+                description: 'Maintain perfect attendance for 10 weeks',
+                icon: 'fas fa-calendar-check',
+                xpReward: 300,
+                condition: (stats) => stats.perfectAttendance >= 10
+            },
+            {
+                id: 'punctual_employee',
+                title: 'Always On Time',
+                description: 'Log in on time 30+ times',
+                icon: 'fas fa-hourglass-start',
+                xpReward: 150,
+                condition: (stats) => stats.onTimeLogins >= 30
+            },
+            {
+                id: 'goal_crusher',
+                title: 'Goal Crusher',
+                description: 'Complete 5 performance goals',
+                icon: 'fas fa-bullseye',
+                xpReward: 250,
+                condition: (stats) => stats.goalsCompleted >= 5
+            },
+            {
+                id: 'expense_pro',
+                title: 'Expense Pro',
+                description: 'Submit 10 expense claims',
+                icon: 'fas fa-receipt',
+                xpReward: 180,
+                condition: (stats) => stats.expenseClaims >= 10
+            },
+            {
+                id: 'team_player',
+                title: 'Team Player',
+                description: 'Participate in 3 performance reviews',
+                icon: 'fas fa-users',
+                xpReward: 220,
+                condition: (stats) => stats.performanceReviews >= 3
+            },
+            {
+                id: 'reports_master',
+                title: 'Reports Master',
+                description: 'Generate 15 reports',
+                icon: 'fas fa-file-alt',
+                xpReward: 160,
+                condition: (stats) => stats.reportsGenerated >= 15
+            },
+            {
+                id: 'profile_perfectionist',
+                title: 'Profile Perfectionist',
+                description: 'Update your profile 10 times',
+                icon: 'fas fa-user-edit',
+                xpReward: 120,
+                condition: (stats) => stats.profileUpdates >= 10
+            },
+            {
+                id: 'leave_planner',
+                title: 'Strategic Leave Planner',
+                description: 'Submit 5 leave requests',
+                icon: 'fas fa-calendar-alt',
+                xpReward: 140,
+                condition: (stats) => stats.leaveRequests >= 5
+            },
+            {
+                id: 'dedication_100',
+                title: '100% Dedicated',
+                description: 'Log in for 100 days',
+                icon: 'fas fa-trophy',
+                xpReward: 500,
+                condition: (stats) => stats.totalLoginDays >= 100
+            }
+        ];
+    }
+    
+    function calculateAchievementProgress(achievement, stats) {
+        // This is a simplified progress calculation
+        // In a real system, you'd have more detailed progress tracking
+        if (achievement.condition(stats)) {
+            return 100;
+        }
+        
+        // Estimate progress based on stats
+        switch(achievement.id) {
+            case 'first_login':
+                return Math.min(100, stats.totalLoginDays * 100);
+            case 'login_streak_7':
+                return Math.min(100, (stats.loginStreak / 7) * 100);
+            case 'time_tracker':
+                return Math.min(100, (stats.timeTracked / 100) * 100);
+            case 'perfect_attendance':
+                return Math.min(100, (stats.perfectAttendance / 10) * 100);
+            case 'punctual_employee':
+                return Math.min(100, (stats.onTimeLogins / 30) * 100);
+            case 'goal_crusher':
+                return Math.min(100, (stats.goalsCompleted / 5) * 100);
+            case 'expense_pro':
+                return Math.min(100, (stats.expenseClaims / 10) * 100);
+            case 'team_player':
+                return Math.min(100, (stats.performanceReviews / 3) * 100);
+            case 'reports_master':
+                return Math.min(100, (stats.reportsGenerated / 15) * 100);
+            case 'profile_perfectionist':
+                return Math.min(100, (stats.profileUpdates / 10) * 100);
+            case 'leave_planner':
+                return Math.min(100, (stats.leaveRequests / 5) * 100);
+            case 'dedication_100':
+                return Math.min(100, (stats.totalLoginDays / 100) * 100);
+            default:
+                return 0;
+        }
+    }
+    
+    function checkAndAwardAchievements(username) {
+        const achievements = getAllAchievements();
+        const userStats = getUserStats(username);
+        const earnedAchievements = JSON.parse(localStorage.getItem(`achievements_${username}`) || '[]');
+        
+        achievements.forEach(achievement => {
+            if (!earnedAchievements.includes(achievement.id) && achievement.condition(userStats)) {
+                awardAchievement(username, achievement);
+            }
+        });
+    }
+    
+    function awardAchievement(username, achievement) {
+        const earnedAchievements = JSON.parse(localStorage.getItem(`achievements_${username}`) || '[]');
+        earnedAchievements.push(achievement.id);
+        localStorage.setItem(`achievements_${username}`, JSON.stringify(earnedAchievements));
+        
+        // Show achievement notification
+        showAchievementNotification(achievement);
+        
+        // Update stats with XP reward
+        const stats = getUserStats(username);
+        // XP is calculated dynamically, so no need to store it separately
+    }
+    
+    function showAchievementNotification(achievement) {
+        const notification = document.createElement('div');
+        notification.className = 'achievement-notification';
+        notification.innerHTML = `
+            <div class="notification-content">
+                <div class="notification-icon">
+                    <i class="${achievement.icon}"></i>
+                </div>
+                <div class="notification-text">
+                    <h4>Achievement Unlocked!</h4>
+                    <p>${achievement.title}</p>
+                    <span class="xp-reward">+${achievement.xpReward} XP</span>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(notification);
+        
+        // Animate in
+        setTimeout(() => notification.classList.add('show'), 100);
+        
+        // Remove after 5 seconds
+        setTimeout(() => {
+            notification.classList.remove('show');
+            setTimeout(() => notification.remove(), 300);
+        }, 5000);
+    }
+    
+    function loadLeaderboard() {
+        const allUsers = JSON.parse(localStorage.getItem('employeeDirectory') || '[]');
+        const userScores = allUsers.map(user => {
+            const stats = getUserStats(user.username);
+            const xp = calculateTotalXP(stats);
+            const level = calculateLevel(xp);
+            return {
+                name: user.name,
+                username: user.username,
+                xp: xp,
+                level: level
+            };
+        }).sort((a, b) => b.xp - a.xp);
+        
+        const tbody = document.getElementById('leaderboardBody');
+        tbody.innerHTML = userScores.map((user, index) => `
+            <tr>
+                <td>
+                    <div class="rank-badge rank-${index + 1}">
+                        ${index < 3 ? ['🥇', '🥈', '🥉'][index] : `#${index + 1}`}
+                    </div>
+                </td>
+                <td>
+                    <div class="user-info">
+                        <strong>${user.name}</strong>
+                        <span class="username">@${user.username}</span>
+                    </div>
+                </td>
+                <td>
+                    <span class="level-badge">Level ${user.level}</span>
+                </td>
+                <td>
+                    <span class="xp-amount">${user.xp.toLocaleString()} XP</span>
+                </td>
+            </tr>
+        `).join('');
+    }
+    
+    function addXP(username, amount, reason) {
+        // XP is calculated dynamically from stats
+        // This function could be used to trigger notifications or updates
+        console.log(`${username} earned ${amount} XP for: ${reason}`);
+    }
+    
+    document.addEventListener('DOMContentLoaded', checkAuth);
+  </script>
+  <style>
+    .user-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+    .stat-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      text-align: center;
+      box-shadow: var(--shadow);
+      position: relative;
+      overflow: hidden;
+    }
+    .stat-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, #3b82f6, #8b5cf6, #ec4899);
+    }
+    .stat-card h4 {
+      margin: 0 0 10px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .stat-card .value {
+      font-size: 2rem;
+      font-weight: bold;
+      color: var(--primary);
+    }
+    .level-progress {
+      margin-top: 10px;
+    }
+    .progress-bar {
+      height: 8px;
+      background: #e5e7eb;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+      transition: width 0.3s ease;
+    }
+    .achievements-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+    .achievement-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      box-shadow: var(--shadow);
+      transition: transform 0.2s ease;
+    }
+    .achievement-card.earned {
+      border-color: #10b981;
+      background: linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%);
+    }
+    .achievement-card:hover {
+      transform: translateY(-2px);
+    }
+    .achievement-icon {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 60px;
+      height: 60px;
+      background: var(--primary);
+      border-radius: 50%;
+      color: white;
+      font-size: 1.5rem;
+      margin-bottom: 15px;
+    }
+    .achievement-card.earned .achievement-icon {
+      background: #10b981;
+    }
+    .earned-badge {
+      position: absolute;
+      top: -5px;
+      right: -5px;
+      background: #10b981;
+      color: white;
+      border-radius: 50%;
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.8rem;
+      font-weight: bold;
+    }
+    .achievement-content h4 {
+      margin: 0 0 8px;
+      color: var(--text);
+    }
+    .achievement-content p {
+      margin: 0 0 15px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .achievement-progress {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .progress-text {
+      font-size: 0.8rem;
+      color: var(--muted);
+      min-width: 40px;
+    }
+    .achievement-reward {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      color: #f59e0b;
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+    .leaderboard-table {
+      font-size: 0.9rem;
+    }
+    .rank-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      font-weight: bold;
+      font-size: 0.9rem;
+    }
+    .rank-1 { background: #ffd700; color: #000; }
+    .rank-2 { background: #c0c0c0; color: #000; }
+    .rank-3 { background: #cd7f32; color: #fff; }
+    .rank-badge:not(.rank-1):not(.rank-2):not(.rank-3) {
+      background: var(--primary);
+      color: white;
+    }
+    .user-info {
+      display: flex;
+      flex-direction: column;
+    }
+    .user-info .username {
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .level-badge {
+      background: #8b5cf6;
+      color: white;
+      padding: 4px 8px;
+      border-radius: 12px;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+    .xp-amount {
+      font-weight: 600;
+      color: var(--primary);
+    }
+    .achievement-notification {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: white;
+      border: 1px solid #10b981;
+      border-radius: 12px;
+      padding: 15px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+      z-index: 1000;
+      transform: translateX(400px);
+      transition: transform 0.3s ease;
+    }
+    .achievement-notification.show {
+      transform: translateX(0);
+    }
+    .notification-content {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+    }
+    .notification-icon {
+      width: 50px;
+      height: 50px;
+      background: #10b981;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 1.2rem;
+    }
+    .notification-text h4 {
+      margin: 0 0 5px;
+      color: var(--text);
+      font-size: 1rem;
+    }
+    .notification-text p {
+      margin: 0 0 5px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .xp-reward {
+      color: #f59e0b;
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+    @media (max-width: 768px) {
+      .achievements-grid {
+        grid-template-columns: 1fr;
+      }
+      .user-stats {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="header-content">
+      <h1><i class="fas fa-trophy"></i> Achievements & Rewards</h1>
+      <div class="user-info">
+        <span id="currentUser">Loading...</span>
+        <button onclick="logout()" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</button>
+      </div>
+    </div>
+  </header>
+  
+  <div class="container">
+    <nav class="sidebar">
+      <div class="sidebar-header"><i class="fas fa-user-tie"></i><span>Employee Portal</span></div>
+      <ul class="nav-links">
+        <li><a href="employee-dashboard.html"><i class="fas fa-tachometer-alt"></i><span>Dashboard</span></a></li>
+        <li><a href="employee-reports.html"><i class="fas fa-file-alt"></i><span>My Reports</span></a></li>
+        <li><a href="employee-profile.html"><i class="fas fa-user-cog"></i><span>Profile</span></a></li>
+        <li><a href="time-tracking.html"><i class="fas fa-clock"></i><span>Time Tracking</span></a></li>
+        <li><a href="employee-directory.html"><i class="fas fa-users"></i><span>Directory</span></a></li>
+        <li><a href="leave-management.html"><i class="fas fa-calendar-alt"></i><span>Leave</span></a></li>
+        <li><a href="shift-scheduling.html"><i class="fas fa-calendar-alt"></i><span>Shifts</span></a></li>
+        <li><a href="expense-reimbursement.html"><i class="fas fa-receipt"></i><span>Expenses</span></a></li>
+        <li><a href="performance-reviews.html"><i class="fas fa-chart-line"></i><span>Performance</span></a></li>
+        <li class="active"><a href="achievements.html"><i class="fas fa-trophy"></i><span>Achievements</span></a></li>
+      </ul>
+    </nav>
+    
+    <main class="main-content">
+      <div class="page-header">
+        <h2><i class="fas fa-trophy"></i> Achievements & Rewards</h2>
+        <p>Track your progress, earn achievements, and climb the leaderboard!</p>
+      </div>
+      
+      <!-- User Stats -->
+      <div class="user-stats">
+        <div class="stat-card">
+          <h4>Current Level</h4>
+          <div class="value" id="userLevel">1</div>
+          <div class="level-progress">
+            <div class="progress-bar">
+              <div class="progress-fill" id="nextLevelProgress"></div>
+            </div>
+            <div class="progress-text" id="nextLevelXP">0 XP to next level</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <h4>Total XP</h4>
+          <div class="value" id="userXP">0</div>
+        </div>
+        <div class="stat-card">
+          <h4>Current Rank</h4>
+          <div class="value" id="userRank">#1</div>
+        </div>
+      </div>
+      
+      <!-- Achievements -->
+      <div class="content-section">
+        <div class="section-header">
+          <h3><i class="fas fa-medal"></i> Achievements</h3>
+        </div>
+        <div class="achievements-grid" id="achievementsContainer">
+          <!-- Achievements will be populated here -->
+        </div>
+      </div>
+      
+      <!-- Leaderboard -->
+      <div class="content-section">
+        <div class="section-header">
+          <h3><i class="fas fa-crown"></i> Leaderboard</h3>
+        </div>
+        <div class="table-container">
+          <table class="data-table leaderboard-table">
+            <thead>
+              <tr>
+                <th>Rank</th>
+                <th>Employee</th>
+                <th>Level</th>
+                <th>Total XP</th>
+              </tr>
+            </thead>
+            <tbody id="leaderboardBody">
+              <!-- Data will be populated here -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+  
+  <footer><p>&copy; 2025 PayrollPro by Aaron | Achievements & Rewards</p></footer>
+</body>
+</html>
