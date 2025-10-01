@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Leave Management - Payroll Management</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <script>
+    function logout(){ localStorage.removeItem('authToken'); localStorage.removeItem('userRole'); localStorage.removeItem('username'); localStorage.removeItem('fullName'); window.location.href='login.html'; }
+    function checkAuth(){ const t=localStorage.getItem('authToken'); const r=localStorage.getItem('userRole'); const u=localStorage.getItem('username'); if(!t||!r||!u){ window.location.href='login.html'; return; } document.getElementById('currentUser').innerHTML=`<span>${localStorage.getItem('fullName') || u}</span><span class="role-badge">${r.toUpperCase()}</span>`; document.body.classList.add('employee-theme'); loadLeaveData(); }
+    
+    function loadLeaveData() {
+        const username = localStorage.getItem('username');
+        loadLeaveBalance(username);
+        loadLeaveRequests(username);
+        loadLeaveHistory(username);
+    }
+    
+    function loadLeaveBalance(username) {
+        const balance = JSON.parse(localStorage.getItem(`leaveBalance_${username}`) || '[]');
+        if (balance.length === 0) {
+            const demoBalance = {
+                vacation: 20,
+                sick: 10,
+                personal: 5,
+                total: 35
+            };
+            localStorage.setItem(`leaveBalance_${username}`, JSON.stringify(demoBalance));
+            displayLeaveBalance(demoBalance);
+        } else {
+            displayLeaveBalance(balance);
+        }
+    }
+    
+    function displayLeaveBalance(balance) {
+        document.getElementById('vacationDays').textContent = balance.vacation;
+        document.getElementById('sickDays').textContent = balance.sick;
+        document.getElementById('personalDays').textContent = balance.personal;
+        document.getElementById('totalDays').textContent = balance.total;
+    }
+    
+    function loadLeaveRequests(username) {
+        const requests = JSON.parse(localStorage.getItem(`leaveRequests_${username}`) || '[]');
+        if (requests.length === 0) {
+            const demoRequests = [
+                {
+                    id: 1,
+                    type: 'Vacation',
+                    startDate: '2025-04-01',
+                    endDate: '2025-04-03',
+                    days: 3,
+                    status: 'Pending',
+                    reason: 'Family vacation',
+                    submittedDate: '2025-03-20'
+                },
+                {
+                    id: 2,
+                    type: 'Sick',
+                    startDate: '2025-03-15',
+                    endDate: '2025-03-15',
+                    days: 1,
+                    status: 'Approved',
+                    reason: 'Doctor appointment',
+                    submittedDate: '2025-03-10'
+                }
+            ];
+            localStorage.setItem(`leaveRequests_${username}`, JSON.stringify(demoRequests));
+            displayLeaveRequests(demoRequests);
+        } else {
+            displayLeaveRequests(requests);
+        }
+    }
+    
+    function displayLeaveRequests(requests) {
+        const tbody = document.getElementById('requestsBody');
+        if (requests.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" class="no-data">No leave requests found</td></tr>';
+            return;
+        }
+        
+        tbody.innerHTML = requests.map(request => `
+            <tr>
+                <td>${request.type}</td>
+                <td>${new Date(request.startDate).toLocaleDateString()}</td>
+                <td>${new Date(request.endDate).toLocaleDateString()}</td>
+                <td>${request.days}</td>
+                <td><span class="status-badge ${getStatusClass(request.status)}">${request.status}</span></td>
+                <td>
+                    <button class="secondary-btn small" onclick="viewRequestDetails(${request.id})">
+                        <i class="fas fa-eye"></i> View
+                    </button>
+                    ${request.status === 'Pending' ? `<button class="danger small" onclick="cancelRequest(${request.id})"><i class="fas fa-times"></i> Cancel</button>` : ''}
+                </td>
+            </tr>
+        `).join('');
+    }
+    
+    function loadLeaveHistory(username) {
+        const history = JSON.parse(localStorage.getItem(`leaveHistory_${username}`) || '[]');
+        if (history.length === 0) {
+            const demoHistory = [
+                {
+                    id: 3,
+                    type: 'Vacation',
+                    startDate: '2025-02-15',
+                    endDate: '2025-02-17',
+                    days: 3,
+                    status: 'Approved',
+                    reason: 'Personal time off'
+                },
+                {
+                    id: 4,
+                    type: 'Sick',
+                    startDate: '2025-01-20',
+                    endDate: '2025-01-20',
+                    days: 1,
+                    status: 'Approved',
+                    reason: 'Illness'
+                }
+            ];
+            localStorage.setItem(`leaveHistory_${username}`, JSON.stringify(demoHistory));
+            displayLeaveHistory(demoHistory);
+        } else {
+            displayLeaveHistory(history);
+        }
+    }
+    
+    function displayLeaveHistory(history) {
+        const tbody = document.getElementById('historyBody');
+        if (history.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="no-data">No leave history found</td></tr>';
+            return;
+        }
+        
+        tbody.innerHTML = history.map(entry => `
+            <tr>
+                <td>${entry.type}</td>
+                <td>${new Date(entry.startDate).toLocaleDateString()}</td>
+                <td>${new Date(entry.endDate).toLocaleDateString()}</td>
+                <td>${entry.days}</td>
+                <td><span class="status-badge ${getStatusClass(entry.status)}">${entry.status}</span></td>
+            </tr>
+        `).join('');
+    }
+    
+    function getStatusClass(status) {
+        switch(status) {
+            case 'Approved': return 'success';
+            case 'Pending': return 'warning';
+            case 'Rejected': return 'danger';
+            default: return 'warning';
+        }
+    }
+    
+    function openNewRequestModal() {
+        document.getElementById('newRequestModal').style.display = 'block';
+    }
+    
+    function closeNewRequestModal() {
+        document.getElementById('newRequestModal').style.display = 'none';
+        document.getElementById('newRequestForm').reset();
+    }
+    
+    function submitLeaveRequest(e) {
+        e.preventDefault();
+        
+        const form = e.target;
+        const formData = new FormData(form);
+        
+        const request = {
+            id: Date.now(),
+            type: formData.get('type'),
+            startDate: formData.get('startDate'),
+            endDate: formData.get('endDate'),
+            days: calculateDays(formData.get('startDate'), formData.get('endDate')),
+            status: 'Pending',
+            reason: formData.get('reason'),
+            submittedDate: new Date().toISOString().split('T')[0]
+        };
+        
+        const username = localStorage.getItem('username');
+        const requests = JSON.parse(localStorage.getItem(`leaveRequests_${username}`) || '[]');
+        requests.unshift(request);
+        localStorage.setItem(`leaveRequests_${username}`, JSON.stringify(requests));
+        
+        // Update leave balance
+        updateLeaveBalance(request.type, request.days);
+        
+        loadLeaveRequests(username);
+        closeNewRequestModal();
+        
+        alert('Leave request submitted successfully!');
+    }
+    
+    function calculateDays(startDate, endDate) {
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        const diffTime = Math.abs(end - start);
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        return diffDays + 1; // Include both start and end dates
+    }
+    
+    function updateLeaveBalance(type, days) {
+        const username = localStorage.getItem('username');
+        const balance = JSON.parse(localStorage.getItem(`leaveBalance_${username}`) || '{}');
+        
+        if (balance[type.toLowerCase()] !== undefined) {
+            balance[type.toLowerCase()] -= days;
+            balance.total -= days;
+            localStorage.setItem(`leaveBalance_${username}`, JSON.stringify(balance));
+            displayLeaveBalance(balance);
+        }
+    }
+    
+    function viewRequestDetails(requestId) {
+        const username = localStorage.getItem('username');
+        const requests = JSON.parse(localStorage.getItem(`leaveRequests_${username}`) || '[]');
+        const request = requests.find(r => r.id === requestId);
+        
+        if (!request) return;
+        
+        document.getElementById('detailType').textContent = request.type;
+        document.getElementById('detailStart').textContent = new Date(request.startDate).toLocaleDateString();
+        document.getElementById('detailEnd').textContent = new Date(request.endDate).toLocaleDateString();
+        document.getElementById('detailDays').textContent = request.days;
+        document.getElementById('detailStatus').textContent = request.status;
+        document.getElementById('detailReason').textContent = request.reason;
+        document.getElementById('detailSubmitted').textContent = new Date(request.submittedDate).toLocaleDateString();
+        
+        document.getElementById('requestDetailsModal').style.display = 'block';
+    }
+    
+    function closeRequestDetailsModal() {
+        document.getElementById('requestDetailsModal').style.display = 'none';
+    }
+    
+    function cancelRequest(requestId) {
+        if (!confirm('Are you sure you want to cancel this leave request?')) return;
+        
+        const username = localStorage.getItem('username');
+        const requests = JSON.parse(localStorage.getItem(`leaveRequests_${username}`) || '[]');
+        const request = requests.find(r => r.id === requestId);
+        
+        if (request) {
+            // Restore leave balance
+            const balance = JSON.parse(localStorage.getItem(`leaveBalance_${username}`) || '{}');
+            balance[request.type.toLowerCase()] += request.days;
+            balance.total += request.days;
+            localStorage.setItem(`leaveBalance_${username}`, JSON.stringify(balance));
+            displayLeaveBalance(balance);
+            
+            // Remove request
+            const filtered = requests.filter(r => r.id !== requestId);
+            localStorage.setItem(`leaveRequests_${username}`, JSON.stringify(filtered));
+            loadLeaveRequests(username);
+        }
+    }
+    
+    // Close modals when clicking outside
+    window.onclick = function(event) {
+        const modals = [
+            document.getElementById('newRequestModal'),
+            document.getElementById('requestDetailsModal')
+        ];
+        modals.forEach(modal => {
+            if (event.target === modal) {
+                modal.style.display = 'none';
+            }
+        });
+    }
+    
+    document.addEventListener('DOMContentLoaded', checkAuth);
+  </script>
+  <style>
+    .balance-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+    .balance-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 15px;
+      text-align: center;
+      box-shadow: var(--shadow);
+    }
+    .balance-card h4 {
+      margin: 0 0 8px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .balance-card .days {
+      font-size: 2rem;
+      font-weight: bold;
+      color: var(--primary);
+    }
+    .balance-card .label {
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="header-content">
+      <h1><i class="fas fa-calendar-alt"></i> Leave Management</h1>
+      <div class="user-info">
+        <span id="currentUser">Loading...</span>
+        <button onclick="logout()" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</button>
+      </div>
+    </div>
+  </header>
+  
+  <div class="container">
+    <nav class="sidebar">
+      <div class="sidebar-header"><i class="fas fa-user-tie"></i><span>Employee Portal</span></div>
+      <ul class="nav-links">
+        <li><a href="employee-dashboard.html"><i class="fas fa-tachometer-alt"></i><span>Dashboard</span></a></li>
+        <li><a href="employee-reports.html"><i class="fas fa-file-alt"></i><span>My Reports</span></a></li>
+        <li><a href="employee-profile.html"><i class="fas fa-user-cog"></i><span>Profile</span></a></li>
+        <li><a href="time-tracking.html"><i class="fas fa-clock"></i><span>Time Tracking</span></a></li>
+        <li><a href="employee-directory.html"><i class="fas fa-users"></i><span>Directory</span></a></li>
+        <li class="active"><a href="leave-management.html"><i class="fas fa-calendar-alt"></i><span>Leave</span></a></li>
+      </ul>
+    </nav>
+    
+    <main class="main-content">
+      <div class="page-header">
+        <h2><i class="fas fa-calendar-alt"></i> Leave Management</h2>
+        <p>Manage your leave requests and track your leave balance.</p>
+      </div>
+      
+      <!-- Leave Balance -->
+      <div class="content-section">
+        <div class="section-header">
+          <h3><i class="fas fa-chart-pie"></i> Leave Balance</h3>
+        </div>
+        <div class="balance-cards">
+          <div class="balance-card">
+            <h4>Vacation Days</h4>
+            <div class="days" id="vacationDays">20</div>
+            <div class="label">days remaining</div>
+          </div>
+          <div class="balance-card">
+            <h4>Sick Days</h4>
+            <div class="days" id="sickDays">10</div>
+            <div class="label">days remaining</div>
+          </div>
+          <div class="balance-card">
+            <h4>Personal Days</h4>
+            <div class="days" id="personalDays">5</div>
+            <div class="label">days remaining</div>
+          </div>
+          <div class="balance-card">
+            <h4>Total</h4>
+            <div class="days" id="totalDays">35</div>
+            <div class="label">days remaining</div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- New Request Button -->
+      <div class="content-section">
+        <div class="section-header">
+          <h3><i class="fas fa-plus"></i> Leave Requests</h3>
+          <button onclick="openNewRequestModal()" class="primary-btn">
+            <i class="fas fa-plus"></i> New Request
+          </button>
+        </div>
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>Start Date</th>
+                <th>End Date</th>
+                <th>Days</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="requestsBody">
+              <!-- Data will be populated here -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+      
+      <!-- Leave History -->
+      <div class="content-section">
+        <div class="section-header">
+          <h3><i class="fas fa-history"></i> Leave History</h3>
+        </div>
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>Start Date</th>
+                <th>End Date</th>
+                <th>Days</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="historyBody">
+              <!-- Data will be populated here -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+  
+  <footer><p>&copy; 2025 PayrollPro by Aaron | Leave Management</p></footer>
+  
+  <!-- New Request Modal -->
+  <div id="newRequestModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3><i class="fas fa-plus"></i> New Leave Request</h3>
+        <span class="close" onclick="closeNewRequestModal()">&times;</span>
+      </div>
+      <form id="newRequestForm" onsubmit="submitLeaveRequest(event)">
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="type">Leave Type</label>
+            <select name="type" required>
+              <option value="">Select type...</option>
+              <option value="Vacation">Vacation</option>
+              <option value="Sick">Sick</option>
+              <option value="Personal">Personal</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="startDate">Start Date</label>
+            <input type="date" name="startDate" required>
+          </div>
+          <div class="form-group">
+            <label for="endDate">End Date</label>
+            <input type="date" name="endDate" required>
+          </div>
+          <div class="form-group">
+            <label for="reason">Reason</label>
+            <textarea name="reason" rows="3" placeholder="Please provide a reason for your leave request..."></textarea>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" onclick="closeNewRequestModal()" class="secondary-btn">Cancel</button>
+          <button type="submit" class="primary-btn">Submit Request</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  
+  <!-- Request Details Modal -->
+  <div id="requestDetailsModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3><i class="fas fa-eye"></i> Request Details</h3>
+        <span class="close" onclick="closeRequestDetailsModal()">&times;</span>
+      </div>
+      <div class="modal-grid">
+        <div class="modal-field">
+          <label>Leave Type</label>
+          <span id="detailType">-</span>
+        </div>
+        <div class="modal-field">
+          <label>Start Date</label>
+          <span id="detailStart">-</span>
+        </div>
+        <div class="modal-field">
+          <label>End Date</label>
+          <span id="detailEnd">-</span>
+        </div>
+        <div class="modal-field">
+          <label>Days</label>
+          <span id="detailDays">-</span>
+        </div>
+        <div class="modal-field">
+          <label>Status</label>
+          <span id="detailStatus">-</span>
+        </div>
+        <div class="modal-field">
+          <label>Submitted Date</label>
+          <span id="detailSubmitted">-</span>
+        </div>
+      </div>
+      <div class="modal-field">
+        <label>Reason</label>
+        <span id="detailReason">-</span>
+      </div>
+      <div class="modal-actions">
+        <button onclick="closeRequestDetailsModal()" class="primary-btn">Close</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

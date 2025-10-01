@@ -7,8 +7,103 @@
   <link rel="stylesheet" href="style.css">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
   <script>
-    function logout(){ localStorage.removeItem('authToken'); localStorage.removeItem('userRole'); localStorage.removeItem('username'); window.location.href='login.html'; }
-    function checkAuth(){ const t=localStorage.getItem('authToken'); const r=localStorage.getItem('userRole'); const u=localStorage.getItem('username'); if(!t||!r||!u){ window.location.href='login.html'; return; } if(r!=='employee'){ window.location.href='login.html'; return; } document.getElementById('currentUser').innerHTML=`<span>${u}</span><span class="role-badge">Employee</span>`; document.body.classList.add('employee-theme'); }
+    function logout(){ localStorage.removeItem('authToken'); localStorage.removeItem('userRole'); localStorage.removeItem('username'); localStorage.removeItem('fullName'); window.location.href='login.html'; }
+    function checkAuth(){ const t=localStorage.getItem('authToken'); const r=localStorage.getItem('userRole'); const u=localStorage.getItem('username'); if(!t||!r||!u){ window.location.href='login.html'; return; } if(r!=='employee'){ window.location.href='login.html'; return; } document.getElementById('currentUser').innerHTML=`<span>${localStorage.getItem('fullName') || u}</span><span class="role-badge">Employee</span>`; document.body.classList.add('employee-theme'); loadDashboardData(); }
+    
+    function loadDashboardData() {
+        const username = localStorage.getItem('username');
+        const employeeId = localStorage.getItem('employeeId') || 'EMP0001';
+        
+        // Load payslip data
+        loadRecentPayslips(username);
+        
+        // Calculate next payday (assuming bi-weekly on Fridays)
+        const nextPayday = getNextPayday();
+        document.querySelector('.stat .num').textContent = nextPayday.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        
+        // Calculate days until payday
+        const daysUntil = Math.ceil((nextPayday - new Date()) / (1000 * 60 * 60 * 24));
+        document.querySelector('.stat .muted').textContent = `In ${daysUntil} days`;
+        
+        // Load YTD earnings
+        loadYTDEarnings(username);
+        
+        // Load recent activity
+        loadRecentActivity(username);
+    }
+    
+    function getNextPayday() {
+        const today = new Date();
+        const dayOfWeek = today.getDay();
+        const daysUntilFriday = (5 - dayOfWeek + 7) % 7;
+        let nextFriday = new Date(today);
+        nextFriday.setDate(today.getDate() + daysUntilFriday);
+        
+        // If it's Friday, check if we need next week's Friday
+        if (dayOfWeek === 5 && today.getDate() === nextFriday.getDate()) {
+            nextFriday.setDate(nextFriday.getDate() + 7);
+        }
+        
+        return nextFriday;
+    }
+    
+    function loadRecentPayslips(username) {
+        const payslips = JSON.parse(localStorage.getItem(`payslips_${username}`) || '[]');
+        if (payslips.length === 0) {
+            // Generate demo payslips
+            const demoPayslips = [
+                { date: '2025-03-15', gross: 2500, net: 1880, period: 'Mar 1 - Mar 15' },
+                { date: '2025-02-28', gross: 2500, net: 1880, period: 'Feb 16 - Feb 28' },
+                { date: '2025-02-15', gross: 2500, net: 1880, period: 'Feb 1 - Feb 15' }
+            ];
+            localStorage.setItem(`payslips_${username}`, JSON.stringify(demoPayslips));
+            updatePendingReports(3);
+        } else {
+            updatePendingReports(payslips.length);
+        }
+    }
+    
+    function loadYTDEarnings(username) {
+        const payslips = JSON.parse(localStorage.getItem(`payslips_${username}`) || '[]');
+        const currentYear = new Date().getFullYear();
+        const ytdGross = payslips
+            .filter(p => new Date(p.date).getFullYear() === currentYear)
+            .reduce((sum, p) => sum + p.gross, 0);
+        
+        document.querySelectorAll('.stat .num')[1].textContent = `$${ytdGross.toLocaleString()}`;
+    }
+    
+    function updatePendingReports(count) {
+        document.querySelectorAll('.stat .num')[2].textContent = count.toString();
+    }
+    
+    function loadRecentActivity(username) {
+        const activities = JSON.parse(localStorage.getItem(`activities_${username}`) || '[]');
+        if (activities.length === 0) {
+            // Generate demo activities
+            const demoActivities = [
+                { date: new Date().toLocaleDateString(), action: 'Logged in', status: 'Success' },
+                { date: new Date(Date.now() - 86400000).toLocaleDateString(), action: 'Viewed payslip', status: 'OK' },
+                { date: new Date(Date.now() - 172800000).toLocaleDateString(), action: 'Updated profile', status: 'Success' }
+            ];
+            localStorage.setItem(`activities_${username}`, JSON.stringify(demoActivities));
+            displayActivities(demoActivities);
+        } else {
+            displayActivities(activities);
+        }
+    }
+    
+    function displayActivities(activities) {
+        const tbody = document.querySelector('.data-table tbody');
+        tbody.innerHTML = activities.map(activity => `
+            <tr>
+                <td>${activity.date}</td>
+                <td>${activity.action}</td>
+                <td><span class="status-badge success">${activity.status}</span></td>
+            </tr>
+        `).join('');
+    }
+    
     document.addEventListener('DOMContentLoaded', checkAuth);
   </script>
   <style> .cards{ display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap:14px; } @media(max-width:900px){ .cards{ grid-template-columns: 1fr; } } .stat{ background: var(--card); border:1px solid var(--border); border-radius: var(--radius); padding:16px; box-shadow: var(--shadow); } .stat h4{ margin:0 0 6px; } .stat .num{ font-size: 1.6rem; font-weight: 800; } </style>
@@ -30,6 +125,8 @@
         <li class="active"><a href="employee-dashboard.html"><i class="fas fa-tachometer-alt"></i><span>Dashboard</span></a></li>
         <li><a href="employee-reports.html"><i class="fas fa-file-alt"></i><span>My Reports</span></a></li>
         <li><a href="employee-profile.html"><i class="fas fa-user-cog"></i><span>Profile</span></a></li>
+        <li><a href="time-tracking.html"><i class="fas fa-clock"></i><span>Time Tracking</span></a></li>
+        <li><a href="employee-directory.html"><i class="fas fa-users"></i><span>Directory</span></a></li>
       </ul>
     </nav>
     <main class="main-content">

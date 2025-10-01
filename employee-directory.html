@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Employee Directory - Payroll Management</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <script>
+    function logout(){ localStorage.removeItem('authToken'); localStorage.removeItem('userRole'); localStorage.removeItem('username'); localStorage.removeItem('fullName'); window.location.href='login.html'; }
+    function checkAuth(){ const t=localStorage.getItem('authToken'); const r=localStorage.getItem('userRole'); const u=localStorage.getItem('username'); if(!t||!r||!u){ window.location.href='login.html'; return; } document.getElementById('currentUser').innerHTML=`<span>${localStorage.getItem('fullName') || u}</span><span class="role-badge">${r.toUpperCase()}</span>`; document.body.classList.add('employee-theme'); loadEmployeeDirectory(); }
+    
+    function loadEmployeeDirectory() {
+        const employees = getDemoEmployees();
+        displayEmployees(employees);
+        setupSearch();
+    }
+    
+    function getDemoEmployees() {
+        const employees = JSON.parse(localStorage.getItem('employeeDirectory') || '[]');
+        if (employees.length === 0) {
+            const demoEmployees = [
+                {
+                    id: 1,
+                    name: 'Aaron Employee',
+                    username: 'aaron',
+                    email: 'aaron@company.com',
+                    phone: '+1 (555) 123-4567',
+                    department: 'Operations',
+                    role: 'Employee',
+                    employeeId: 'EMP0001',
+                    hireDate: '2023-01-15',
+                    status: 'Active',
+                    avatar: '👨‍💼'
+                },
+                {
+                    id: 2,
+                    name: 'Harper HR',
+                    username: 'hr1',
+                    email: 'hr1@company.com',
+                    phone: '+1 (555) 123-4568',
+                    department: 'Human Resources',
+                    role: 'HR',
+                    employeeId: 'EMP9001',
+                    hireDate: '2022-06-01',
+                    status: 'Active',
+                    avatar: '👩‍💼'
+                },
+                {
+                    id: 3,
+                    name: 'Alex Admin',
+                    username: 'admin',
+                    email: 'admin@company.com',
+                    phone: '+1 (555) 123-4569',
+                    department: 'Administration',
+                    role: 'Admin',
+                    employeeId: 'EMP9999',
+                    hireDate: '2021-03-10',
+                    status: 'Active',
+                    avatar: '👨‍💻'
+                },
+                {
+                    id: 4,
+                    name: 'Sarah Johnson',
+                    username: 'sarah',
+                    email: 'sarah.johnson@company.com',
+                    phone: '+1 (555) 123-4570',
+                    department: 'Marketing',
+                    role: 'Employee',
+                    employeeId: 'EMP0002',
+                    hireDate: '2023-08-20',
+                    status: 'Active',
+                    avatar: '👩‍💼'
+                },
+                {
+                    id: 5,
+                    name: 'Michael Chen',
+                    username: 'michael',
+                    email: 'michael.chen@company.com',
+                    phone: '+1 (555) 123-4571',
+                    department: 'Engineering',
+                    role: 'Employee',
+                    employeeId: 'EMP0003',
+                    hireDate: '2023-11-05',
+                    status: 'Active',
+                    avatar: '👨‍💻'
+                },
+                {
+                    id: 6,
+                    name: 'Emily Davis',
+                    username: 'emily',
+                    email: 'emily.davis@company.com',
+                    phone: '+1 (555) 123-4572',
+                    department: 'Finance',
+                    role: 'Employee',
+                    employeeId: 'EMP0004',
+                    hireDate: '2024-01-10',
+                    status: 'Active',
+                    avatar: '👩‍💼'
+                },
+                {
+                    id: 7,
+                    name: 'David Wilson',
+                    username: 'david',
+                    email: 'david.wilson@company.com',
+                    phone: '+1 (555) 123-4573',
+                    department: 'Sales',
+                    role: 'Employee',
+                    employeeId: 'EMP0005',
+                    hireDate: '2024-02-15',
+                    status: 'Active',
+                    avatar: '👨‍💼'
+                },
+                {
+                    id: 8,
+                    name: 'Lisa Brown',
+                    username: 'lisa',
+                    email: 'lisa.brown@company.com',
+                    phone: '+1 (555) 123-4574',
+                    department: 'Customer Support',
+                    role: 'Employee',
+                    employeeId: 'EMP0006',
+                    hireDate: '2024-03-01',
+                    status: 'Active',
+                    avatar: '👩‍💼'
+                }
+            ];
+            localStorage.setItem('employeeDirectory', JSON.stringify(demoEmployees));
+            return demoEmployees;
+        }
+        return employees;
+    }
+    
+    function displayEmployees(employees) {
+        const container = document.getElementById('employeesContainer');
+        const currentUser = localStorage.getItem('username');
+        
+        // Filter out current user if not admin/hr
+        const userRole = localStorage.getItem('userRole');
+        const filteredEmployees = userRole === 'admin' || userRole === 'hr' 
+            ? employees 
+            : employees.filter(emp => emp.username !== currentUser);
+        
+        container.innerHTML = filteredEmployees.map(employee => `
+            <div class="employee-card" onclick="showEmployeeDetails('${employee.id}')">
+                <div class="employee-avatar">${employee.avatar}</div>
+                <div class="employee-info">
+                    <h4>${employee.name}</h4>
+                    <p class="employee-role">${employee.role} • ${employee.department}</p>
+                    <p class="employee-id">ID: ${employee.employeeId}</p>
+                    <div class="employee-contact">
+                        <span><i class="fas fa-envelope"></i> ${employee.email}</span>
+                        <span><i class="fas fa-phone"></i> ${employee.phone}</span>
+                    </div>
+                </div>
+                <div class="employee-status">
+                    <span class="status-badge ${employee.status === 'Active' ? 'success' : 'warning'}">${employee.status}</span>
+                </div>
+            </div>
+        `).join('');
+    }
+    
+    function showEmployeeDetails(employeeId) {
+        const employees = JSON.parse(localStorage.getItem('employeeDirectory') || '[]');
+        const employee = employees.find(emp => emp.id == employeeId);
+        
+        if (!employee) return;
+        
+        document.getElementById('modalName').textContent = employee.name;
+        document.getElementById('modalEmail').textContent = employee.email;
+        document.getElementById('modalPhone').textContent = employee.phone;
+        document.getElementById('modalDepartment').textContent = employee.department;
+        document.getElementById('modalRole').textContent = employee.role;
+        document.getElementById('modalEmployeeId').textContent = employee.employeeId;
+        document.getElementById('modalHireDate').textContent = new Date(employee.hireDate).toLocaleDateString();
+        document.getElementById('modalUsername').textContent = employee.username;
+        
+        document.getElementById('employeeModal').style.display = 'block';
+    }
+    
+    function closeEmployeeModal() {
+        document.getElementById('employeeModal').style.display = 'none';
+    }
+    
+    function setupSearch() {
+        const searchInput = document.getElementById('searchInput');
+        searchInput.addEventListener('input', function() {
+            const query = this.value.toLowerCase();
+            const employees = getDemoEmployees();
+            const filtered = employees.filter(emp => 
+                emp.name.toLowerCase().includes(query) ||
+                emp.email.toLowerCase().includes(query) ||
+                emp.department.toLowerCase().includes(query) ||
+                emp.employeeId.toLowerCase().includes(query)
+            );
+            displayEmployees(filtered);
+        });
+    }
+    
+    function filterByDepartment() {
+        const department = document.getElementById('departmentFilter').value;
+        const employees = getDemoEmployees();
+        
+        if (department === 'all') {
+            displayEmployees(employees);
+        } else {
+            const filtered = employees.filter(emp => emp.department === department);
+            displayEmployees(filtered);
+        }
+    }
+    
+    function sendEmail(email) {
+        window.open(`mailto:${email}`, '_blank');
+    }
+    
+    function callEmployee(phone) {
+        window.open(`tel:${phone}`, '_self');
+    }
+    
+    // Close modal when clicking outside
+    window.onclick = function(event) {
+        const modal = document.getElementById('employeeModal');
+        if (event.target === modal) {
+            closeEmployeeModal();
+        }
+    }
+    
+    document.addEventListener('DOMContentLoaded', checkAuth);
+  </script>
+  <style>
+    .search-filters {
+      display: flex;
+      gap: 15px;
+      margin-bottom: 20px;
+      align-items: center;
+    }
+    .search-filters input {
+      flex: 1;
+      max-width: 400px;
+    }
+    .search-filters select {
+      min-width: 150px;
+    }
+    .employees-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 20px;
+    }
+    .employee-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      cursor: pointer;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+      box-shadow: var(--shadow);
+    }
+    .employee-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    .employee-avatar {
+      font-size: 3rem;
+      text-align: center;
+      margin-bottom: 15px;
+    }
+    .employee-info h4 {
+      margin: 0 0 5px;
+      color: var(--text);
+      font-size: 1.1rem;
+    }
+    .employee-role {
+      margin: 0 0 5px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .employee-id {
+      margin: 0 0 10px;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    .employee-contact {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    .employee-contact i {
+      margin-right: 5px;
+      width: 12px;
+    }
+    .employee-status {
+      text-align: right;
+      margin-top: 10px;
+    }
+    .modal-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 15px;
+    }
+    .modal-field {
+      display: flex;
+      flex-direction: column;
+    }
+    .modal-field label {
+      font-weight: 600;
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin-bottom: 5px;
+    }
+    .modal-field span {
+      color: var(--text);
+      font-size: 1rem;
+    }
+    .modal-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      margin-top: 20px;
+    }
+    @media (max-width: 768px) {
+      .employees-grid {
+        grid-template-columns: 1fr;
+      }
+      .search-filters {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      .modal-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="header-content">
+      <h1><i class="fas fa-users"></i> Employee Directory</h1>
+      <div class="user-info">
+        <span id="currentUser">Loading...</span>
+        <button onclick="logout()" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</button>
+      </div>
+    </div>
+  </header>
+  
+  <div class="container">
+    <nav class="sidebar">
+      <div class="sidebar-header"><i class="fas fa-user-tie"></i><span>Employee Portal</span></div>
+      <ul class="nav-links">
+        <li><a href="employee-dashboard.html"><i class="fas fa-tachometer-alt"></i><span>Dashboard</span></a></li>
+        <li><a href="employee-reports.html"><i class="fas fa-file-alt"></i><span>My Reports</span></a></li>
+        <li><a href="employee-profile.html"><i class="fas fa-user-cog"></i><span>Profile</span></a></li>
+        <li><a href="time-tracking.html"><i class="fas fa-clock"></i><span>Time Tracking</span></a></li>
+        <li class="active"><a href="employee-directory.html"><i class="fas fa-users"></i><span>Directory</span></a></li>
+      </ul>
+    </nav>
+    
+    <main class="main-content">
+      <div class="page-header">
+        <h2><i class="fas fa-users"></i> Employee Directory</h2>
+        <p>Find and connect with your colleagues.</p>
+      </div>
+      
+      <!-- Search and Filters -->
+      <div class="search-filters">
+        <input type="text" id="searchInput" placeholder="Search employees by name, email, or department...">
+        <select id="departmentFilter" onchange="filterByDepartment()">
+          <option value="all">All Departments</option>
+          <option value="Operations">Operations</option>
+          <option value="Human Resources">Human Resources</option>
+          <option value="Administration">Administration</option>
+          <option value="Marketing">Marketing</option>
+          <option value="Engineering">Engineering</option>
+          <option value="Finance">Finance</option>
+          <option value="Sales">Sales</option>
+          <option value="Customer Support">Customer Support</option>
+        </select>
+      </div>
+      
+      <!-- Employees Grid -->
+      <div class="employees-grid" id="employeesContainer">
+        <!-- Employee cards will be populated here -->
+      </div>
+    </main>
+  </div>
+  
+  <footer><p>&copy; 2025 PayrollPro by Aaron | Employee Directory</p></footer>
+  
+  <!-- Employee Details Modal -->
+  <div id="employeeModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3><i class="fas fa-user"></i> Employee Details</h3>
+        <span class="close" onclick="closeEmployeeModal()">&times;</span>
+      </div>
+      <div class="modal-grid">
+        <div class="modal-field">
+          <label>Full Name</label>
+          <span id="modalName">-</span>
+        </div>
+        <div class="modal-field">
+          <label>Username</label>
+          <span id="modalUsername">-</span>
+        </div>
+        <div class="modal-field">
+          <label>Email</label>
+          <span id="modalEmail">-</span>
+        </div>
+        <div class="modal-field">
+          <label>Phone</label>
+          <span id="modalPhone">-</span>
+        </div>
+        <div class="modal-field">
+          <label>Department</label>
+          <span id="modalDepartment">-</span>
+        </div>
+        <div class="modal-field">
+          <label>Role</label>
+          <span id="modalRole">-</span>
+        </div>
+        <div class="modal-field">
+          <label>Employee ID</label>
+          <span id="modalEmployeeId">-</span>
+        </div>
+        <div class="modal-field">
+          <label>Hire Date</label>
+          <span id="modalHireDate">-</span>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="primary-btn" onclick="sendEmail(document.getElementById('modalEmail').textContent)">
+          <i class="fas fa-envelope"></i> Send Email
+        </button>
+        <button class="secondary-btn" onclick="callEmployee(document.getElementById('modalPhone').textContent)">
+          <i class="fas fa-phone"></i> Call
+        </button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
