@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tax Calculator - Payroll Management</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    function logout(){ localStorage.removeItem('authToken'); localStorage.removeItem('userRole'); localStorage.removeItem('username'); localStorage.removeItem('fullName'); window.location.href='login.html'; }
+    function checkAuth(){ const t=localStorage.getItem('authToken'); const r=localStorage.getItem('userRole'); const u=localStorage.getItem('username'); if(!t||!r||!u){ window.location.href='login.html'; return; } if(r!=='hr' && r!=='admin'){ alert('HR/Admin access required'); window.location.href='login.html'; return; } document.getElementById('currentUser').innerHTML=`<span>${localStorage.getItem('fullName') || u}</span><span class="role-badge">${r.toUpperCase()}</span>`; document.body.classList.add('employee-theme'); loadTaxCalculator(); }
+    
+    let taxChart = null;
+    
+    function loadTaxCalculator() {
+        loadEmployeeList();
+        loadTaxBrackets();
+        generateDemoTaxData();
+    }
+    
+    function loadEmployeeList() {
+        const employees = JSON.parse(localStorage.getItem('employeeDirectory') || '[]');
+        const select = document.getElementById('employeeSelect');
+        select.innerHTML = '<option value="">Select Employee...</option>' +
+            employees.map(emp => `<option value="${emp.employeeId}">${emp.name} (${emp.employeeId})</option>`).join('');
+    }
+    
+    function loadTaxBrackets() {
+        const brackets = JSON.parse(localStorage.getItem('taxBrackets') || '[]');
+        if (brackets.length === 0) {
+            const demoBrackets = [
+                {
+                    region: 'US',
+                    brackets: [
+                        { min: 0, max: 11000, rate: 0.10 },
+                        { min: 11000, max: 44725, rate: 0.12 },
+                        { min: 44725, max: 95375, rate: 0.22 },
+                        { min: 95375, max: 182050, rate: 0.24 },
+                        { min: 182050, max: 231250, rate: 0.32 },
+                        { min: 231250, max: 578125, rate: 0.35 },
+                        { min: 578125, max: Infinity, rate: 0.37 }
+                    ],
+                    standardDeduction: 13850,
+                    socialSecurityRate: 0.062,
+                    medicareRate: 0.0145,
+                    socialSecurityMax: 160200
+                },
+                {
+                    region: 'India',
+                    brackets: [
+                        { min: 0, max: 250000, rate: 0.00 },
+                        { min: 250000, max: 500000, rate: 0.05 },
+                        { min: 500000, max: 750000, rate: 0.10 },
+                        { min: 750000, max: 1000000, rate: 0.15 },
+                        { min: 1000000, max: 1250000, rate: 0.20 },
+                        { min: 1250000, max: 1500000, rate: 0.25 },
+                        { min: 1500000, max: Infinity, rate: 0.30 }
+                    ],
+                    standardDeduction: 50000,
+                    pfRate: 0.12,
+                    esiRate: 0.0075,
+                    pfMax: 1500
+                }
+            ];
+            localStorage.setItem('taxBrackets', JSON.stringify(demoBrackets));
+        }
+    }
+    
+    function generateDemoTaxData() {
+        const employees = JSON.parse(localStorage.getItem('employeeDirectory') || '[]');
+        const taxData = JSON.parse(localStorage.getItem('employeeTaxData') || '[]');
+        
+        if (taxData.length === 0) {
+            const demoData = employees.map(emp => ({
+                employeeId: emp.employeeId,
+                region: 'US',
+                annualSalary: Math.floor(Math.random() * 100000) + 40000,
+                allowances: 2,
+                dependents: 1,
+                additionalDeductions: 0,
+                lastCalculated: new Date().toISOString()
+            }));
+            localStorage.setItem('employeeTaxData', JSON.stringify(demoData));
+        }
+    }
+    
+    function calculateTax() {
+        const employeeId = document.getElementById('employeeSelect').value;
+        const region = document.getElementById('regionSelect').value;
+        const annualSalary = parseFloat(document.getElementById('annualSalary').value) || 0;
+        const allowances = parseInt(document.getElementById('allowances').value) || 0;
+        const dependents = parseInt(document.getElementById('dependents').value) || 0;
+        const additionalDeductions = parseFloat(document.getElementById('additionalDeductions').value) || 0;
+        
+        if (!employeeId || !region || annualSalary <= 0) {
+            alert('Please fill in all required fields');
+            return;
+        }
+        
+        const brackets = getTaxBrackets(region);
+        const result = performTaxCalculation(brackets, annualSalary, allowances, dependents, additionalDeductions, region);
+        
+        displayTaxResults(result);
+        createTaxChart(result);
+        
+        // Save calculation
+        saveTaxCalculation(employeeId, region, annualSalary, allowances, dependents, additionalDeductions, result);
+    }
+    
+    function getTaxBrackets(region) {
+        const allBrackets = JSON.parse(localStorage.getItem('taxBrackets') || '[]');
+        return allBrackets.find(b => b.region === region);
+    }
+    
+    function performTaxCalculation(brackets, annualSalary, allowances, dependents, additionalDeductions, region) {
+        const standardDeduction = brackets.standardDeduction;
+        const taxableIncome = annualSalary - standardDeduction - (dependents * (region === 'US' ? 2000 : 15000)) - additionalDeductions;
+        
+        let totalTax = 0;
+        let bracketDetails = [];
+        
+        // Calculate tax for each bracket
+        for (const bracket of brackets.brackets) {
+            const bracketIncome = Math.min(taxableIncome, bracket.max) - bracket.min;
+            if (bracketIncome > 0) {
+                const bracketTax = bracketIncome * bracket.rate;
+                totalTax += bracketTax;
+                
+                bracketDetails.push({
+                    range: `${formatCurrency(bracket.min)} - ${bracket.max === Infinity ? '∞' : formatCurrency(bracket.max)}`,
+                    rate: `${(bracket.rate * 100).toFixed(1)}%`,
+                    taxableIncome: bracketIncome,
+                    tax: bracketTax
+                });
+            }
+        }
+        
+        // Calculate additional taxes
+        let socialSecurity = 0;
+        let medicare = 0;
+        let pf = 0;
+        let esi = 0;
+        
+        if (region === 'US') {
+            socialSecurity = Math.min(annualSalary, brackets.socialSecurityMax) * brackets.socialSecurityRate;
+            medicare = annualSalary * brackets.medicareRate;
+        } else if (region === 'India') {
+            pf = Math.min(annualSalary * brackets.pfRate, brackets.pfMax * 12);
+            esi = annualSalary * brackets.esiRate;
+        }
+        
+        const netPay = annualSalary - totalTax - socialSecurity - medicare - pf - esi;
+        
+        return {
+            grossSalary: annualSalary,
+            standardDeduction: standardDeduction,
+            dependentDeduction: dependents * (region === 'US' ? 2000 : 15000),
+            additionalDeductions: additionalDeductions,
+            taxableIncome: taxableIncome,
+            incomeTax: totalTax,
+            socialSecurity: socialSecurity,
+            medicare: medicare,
+            pf: pf,
+            esi: esi,
+            totalDeductions: totalTax + socialSecurity + medicare + pf + esi,
+            netPay: netPay,
+            bracketDetails: bracketDetails,
+            region: region,
+            effectiveTaxRate: (totalTax / annualSalary) * 100,
+            totalTaxRate: ((totalTax + socialSecurity + medicare + pf + esi) / annualSalary) * 100
+        };
+    }
+    
+    function formatCurrency(amount) {
+        return new Intl.NumberFormat('en-US', {
+            style: 'currency',
+            currency: 'USD',
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 0
+        }).format(amount);
+    }
+    
+    function displayTaxResults(result) {
+        document.getElementById('grossSalary').textContent = formatCurrency(result.grossSalary);
+        document.getElementById('taxableIncome').textContent = formatCurrency(result.taxableIncome);
+        document.getElementById('incomeTax').textContent = formatCurrency(result.incomeTax);
+        document.getElementById('socialSecurity').textContent = formatCurrency(result.socialSecurity);
+        document.getElementById('medicare').textContent = formatCurrency(result.medicare);
+        document.getElementById('pf').textContent = formatCurrency(result.pf);
+        document.getElementById('esi').textContent = formatCurrency(result.esi);
+        document.getElementById('totalDeductions').textContent = formatCurrency(result.totalDeductions);
+        document.getElementById('netPay').textContent = formatCurrency(result.netPay);
+        document.getElementById('effectiveTaxRate').textContent = `${result.effectiveTaxRate.toFixed(2)}%`;
+        document.getElementById('totalTaxRate').textContent = `${result.totalTaxRate.toFixed(2)}%`;
+        
+        // Display bracket details
+        const bracketContainer = document.getElementById('bracketDetails');
+        bracketContainer.innerHTML = result.bracketDetails.map(bracket => `
+            <tr>
+                <td>${bracket.range}</td>
+                <td>${bracket.rate}</td>
+                <td>${formatCurrency(bracket.taxableIncome)}</td>
+                <td>${formatCurrency(bracket.tax)}</td>
+            </tr>
+        `).join('');
+    }
+    
+    function createTaxChart(result) {
+        const ctx = document.getElementById('taxChart');
+        if (!ctx) return;
+        
+        if (taxChart) {
+            taxChart.destroy();
+        }
+        
+        const labels = ['Gross Salary', 'Income Tax', 'Social Security', 'Medicare', 'PF', 'ESI', 'Net Pay'];
+        const values = [
+            result.grossSalary,
+            result.incomeTax,
+            result.socialSecurity,
+            result.medicare,
+            result.pf,
+            result.esi,
+            result.netPay
+        ].filter(val => val > 0);
+        
+        const filteredLabels = labels.filter((_, index) => [0, 1, 2, 3, 4, 5, 6][index] < values.length && values[index] > 0);
+        
+        taxChart = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: filteredLabels,
+                datasets: [{
+                    data: values,
+                    backgroundColor: [
+                        '#3b82f6',
+                        '#ef4444',
+                        '#f59e0b',
+                        '#8b5cf6',
+                        '#10b981',
+                        '#06b6d4',
+                        '#84cc16'
+                    ]
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        position: 'bottom'
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return context.label + ': ' + formatCurrency(context.parsed);
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+    
+    function saveTaxCalculation(employeeId, region, annualSalary, allowances, dependents, additionalDeductions, result) {
+        const calculation = {
+            id: Date.now(),
+            employeeId: employeeId,
+            region: region,
+            annualSalary: annualSalary,
+            allowances: allowances,
+            dependents: dependents,
+            additionalDeductions: additionalDeductions,
+            result: result,
+            calculatedAt: new Date().toISOString(),
+            calculatedBy: localStorage.getItem('username')
+        };
+        
+        const calculations = JSON.parse(localStorage.getItem('taxCalculations') || '[]');
+        calculations.unshift(calculation);
+        localStorage.setItem('taxCalculations', JSON.stringify(calculations.slice(0, 100))); // Keep last 100
+        
+        // Update employee tax data
+        const taxData = JSON.parse(localStorage.getItem('employeeTaxData') || '[]');
+        const employeeData = taxData.find(d => d.employeeId === employeeId);
+        if (employeeData) {
+            employeeData.region = region;
+            employeeData.annualSalary = annualSalary;
+            employeeData.allowances = allowances;
+            employeeData.dependents = dependents;
+            employeeData.additionalDeductions = additionalDeductions;
+            employeeData.lastCalculated = new Date().toISOString();
+        }
+        localStorage.setItem('employeeTaxData', JSON.stringify(taxData));
+    }
+    
+    function loadEmployeeTaxData() {
+        const employeeId = document.getElementById('employeeSelect').value;
+        if (!employeeId) return;
+        
+        const taxData = JSON.parse(localStorage.getItem('employeeTaxData') || '[]');
+        const employeeData = taxData.find(d => d.employeeId === employeeId);
+        
+        if (employeeData) {
+            document.getElementById('regionSelect').value = employeeData.region;
+            document.getElementById('annualSalary').value = employeeData.annualSalary;
+            document.getElementById('allowances').value = employeeData.allowances;
+            document.getElementById('dependents').value = employeeData.dependents;
+            document.getElementById('additionalDeductions').value = employeeData.additionalDeductions;
+        }
+    }
+    
+    function viewTaxHistory() {
+        const calculations = JSON.parse(localStorage.getItem('taxCalculations') || '[]');
+        const historyContainer = document.getElementById('taxHistoryContainer');
+        
+        if (calculations.length === 0) {
+            historyContainer.innerHTML = '<div class="no-data">No tax calculations found</div>';
+            return;
+        }
+        
+        historyContainer.innerHTML = `
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Employee</th>
+                            <th>Region</th>
+                            <th>Gross Salary</th>
+                            <th>Net Pay</th>
+                            <th>Tax Rate</th>
+                            <th>Calculated</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${calculations.map(calc => `
+                            <tr>
+                                <td>${calc.employeeId}</td>
+                                <td>${calc.region}</td>
+                                <td>${formatCurrency(calc.result.grossSalary)}</td>
+                                <td>${formatCurrency(calc.result.netPay)}</td>
+                                <td>${calc.result.totalTaxRate.toFixed(2)}%</td>
+                                <td>${new Date(calc.calculatedAt).toLocaleDateString()}</td>
+                                <td>
+                                    <button class="secondary-btn small" onclick="viewCalculationDetails('${calc.id}')">
+                                        <i class="fas fa-eye"></i> View
+                                    </button>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    }
+    
+    function viewCalculationDetails(calculationId) {
+        const calculations = JSON.parse(localStorage.getItem('taxCalculations') || '[]');
+        const calculation = calculations.find(c => c.id == calculationId);
+        
+        if (!calculation) return;
+        
+        const result = calculation.result;
+        alert(`Tax Calculation Details:\n\nGross Salary: ${formatCurrency(result.grossSalary)}\nTaxable Income: ${formatCurrency(result.taxableIncome)}\nIncome Tax: ${formatCurrency(result.incomeTax)}\nNet Pay: ${formatCurrency(result.netPay)}\nEffective Tax Rate: ${result.effectiveTaxRate.toFixed(2)}%`);
+    }
+    
+    document.addEventListener('DOMContentLoaded', checkAuth);
+  </script>
+  <style>
+    .calculator-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 30px;
+      margin-bottom: 30px;
+    }
+    .input-section {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      box-shadow: var(--shadow);
+    }
+    .results-section {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      box-shadow: var(--shadow);
+    }
+    .result-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+    .result-item {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .result-item label {
+      font-size: 0.9rem;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .result-item .value {
+      font-size: 1.2rem;
+      font-weight: bold;
+      color: var(--primary);
+    }
+    .chart-container {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 30px;
+      box-shadow: var(--shadow);
+    }
+    .bracket-table {
+      font-size: 0.9rem;
+    }
+    .bracket-table th {
+      background: #f1f5f9;
+      font-weight: 600;
+    }
+    @media (max-width: 768px) {
+      .calculator-grid {
+        grid-template-columns: 1fr;
+      }
+      .result-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="header-content">
+      <h1><i class="fas fa-calculator"></i> Tax Calculator</h1>
+      <div class="user-info">
+        <span id="currentUser">Loading...</span>
+        <button onclick="logout()" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</button>
+      </div>
+    </div>
+  </header>
+  
+  <div class="container">
+    <nav class="sidebar">
+      <div class="sidebar-header"><i class="fas fa-user-tie"></i><span>HR Portal</span></div>
+      <ul class="nav-links">
+        <li><a href="hr-dashboard.html"><i class="fas fa-users"></i><span>HR Dashboard</span></a></li>
+        <li><a href="employee-directory.html"><i class="fas fa-users"></i><span>Directory</span></a></li>
+        <li><a href="performance-reviews.html"><i class="fas fa-chart-line"></i><span>Performance</span></a></li>
+        <li><a href="audit-compliance.html"><i class="fas fa-shield-alt"></i><span>Audit</span></a></li>
+        <li><a href="payroll-calendar.html"><i class="fas fa-calendar-alt"></i><span>Payroll Calendar</span></a></li>
+        <li class="active"><a href="tax-calculator.html"><i class="fas fa-calculator"></i><span>Tax Calculator</span></a></li>
+      </ul>
+    </nav>
+    
+    <main class="main-content">
+      <div class="page-header">
+        <h2><i class="fas fa-calculator"></i> Tax Calculator</h2>
+        <p>Calculate taxes and deductions for employees across different regions.</p>
+      </div>
+      
+      <!-- Calculator -->
+      <div class="calculator-grid">
+        <div class="input-section">
+          <h3><i class="fas fa-edit"></i> Tax Calculation Inputs</h3>
+          <form onsubmit="calculateTax(); return false;">
+            <div class="form-grid">
+              <div class="form-group">
+                <label for="employeeSelect">Employee</label>
+                <select id="employeeSelect" onchange="loadEmployeeTaxData()" required>
+                  <option value="">Select Employee...</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="regionSelect">Region</label>
+                <select id="regionSelect" required>
+                  <option value="">Select Region...</option>
+                  <option value="US">United States</option>
+                  <option value="India">India</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="annualSalary">Annual Salary ($)</label>
+                <input type="number" id="annualSalary" step="0.01" min="0" required>
+              </div>
+              <div class="form-group">
+                <label for="allowances">Allowances</label>
+                <input type="number" id="allowances" min="0" value="0">
+              </div>
+              <div class="form-group">
+                <label for="dependents">Dependents</label>
+                <input type="number" id="dependents" min="0" value="0">
+              </div>
+              <div class="form-group">
+                <label for="additionalDeductions">Additional Deductions ($)</label>
+                <input type="number" id="additionalDeductions" step="0.01" min="0" value="0">
+              </div>
+            </div>
+            <div class="modal-actions">
+              <button type="submit" class="primary-btn">
+                <i class="fas fa-calculator"></i> Calculate Tax
+              </button>
+            </div>
+          </form>
+        </div>
+        
+        <div class="results-section">
+          <h3><i class="fas fa-chart-bar"></i> Tax Calculation Results</h3>
+          <div class="result-grid">
+            <div class="result-item">
+              <label>Gross Salary</label>
+              <div class="value" id="grossSalary">$0.00</div>
+            </div>
+            <div class="result-item">
+              <label>Taxable Income</label>
+              <div class="value" id="taxableIncome">$0.00</div>
+            </div>
+            <div class="result-item">
+              <label>Income Tax</label>
+              <div class="value" id="incomeTax">$0.00</div>
+            </div>
+            <div class="result-item">
+              <label>Social Security</label>
+              <div class="value" id="socialSecurity">$0.00</div>
+            </div>
+            <div class="result-item">
+              <label>Medicare</label>
+              <div class="value" id="medicare">$0.00</div>
+            </div>
+            <div class="result-item">
+              <label>PF</label>
+              <div class="value" id="pf">$0.00</div>
+            </div>
+            <div class="result-item">
+              <label>ESI</label>
+              <div class="value" id="esi">$0.00</div>
+            </div>
+            <div class="result-item">
+              <label>Total Deductions</label>
+              <div class="value" id="totalDeductions">$0.00</div>
+            </div>
+            <div class="result-item">
+              <label>Net Pay</label>
+              <div class="value" id="netPay">$0.00</div>
+            </div>
+            <div class="result-item">
+              <label>Effective Tax Rate</label>
+              <div class="value" id="effectiveTaxRate">0.00%</div>
+            </div>
+            <div class="result-item">
+              <label>Total Tax Rate</label>
+              <div class="value" id="totalTaxRate">0.00%</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Tax Chart -->
+      <div class="chart-container">
+        <h3><i class="fas fa-chart-pie"></i> Salary Breakdown</h3>
+        <canvas id="taxChart" width="400" height="200"></canvas>
+      </div>
+      
+      <!-- Tax Bracket Details -->
+      <div class="content-section">
+        <div class="section-header">
+          <h3><i class="fas fa-list"></i> Tax Bracket Details</h3>
+        </div>
+        <div class="table-container">
+          <table class="data-table bracket-table">
+            <thead>
+              <tr>
+                <th>Income Range</th>
+                <th>Tax Rate</th>
+                <th>Taxable Amount</th>
+                <th>Tax Amount</th>
+              </tr>
+            </thead>
+            <tbody id="bracketDetails">
+              <tr>
+                <td colspan="4" class="no-data">Calculate tax to see bracket details</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      
+      <!-- Tax History -->
+      <div class="content-section">
+        <div class="section-header">
+          <h3><i class="fas fa-history"></i> Tax Calculation History</h3>
+          <button onclick="viewTaxHistory()" class="secondary-btn">
+            <i class="fas fa-refresh"></i> Refresh
+          </button>
+        </div>
+        <div id="taxHistoryContainer">
+          <!-- History will be populated here -->
+        </div>
+      </div>
+    </main>
+  </div>
+  
+  <footer><p>&copy; 2025 PayrollPro by Aaron | Tax Calculator</p></footer>
+</body>
+</html>
