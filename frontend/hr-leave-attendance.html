@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HR Leave & Attendance Management - PayrollPro</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <script src="navigation-enhancer.js"></script>
+  <script src="init-demo-data.js"></script>
+  <script>
+    function logout(){ localStorage.removeItem('authToken'); localStorage.removeItem('userRole'); localStorage.removeItem('username'); localStorage.removeItem('fullName'); window.location.href='../login.html'; }
+    function checkAuth(){ const t=localStorage.getItem('authToken'); const r=localStorage.getItem('userRole'); const u=localStorage.getItem('username'); if(!t||!r||!u){ window.location.href='../login.html'; return; } if(r!=='hr' && r!=='admin'){ alert('HR/Admin access required'); window.location.href='../login.html'; return; } document.getElementById('currentUser').innerHTML=`<span>${localStorage.getItem('fullName') || u}</span><span class="role-badge">${r.toUpperCase()}</span>`; document.body.classList.add('employee-theme'); loadHRData(); }
+
+    // HR Leave & Attendance Management System
+    const LEAVE_TYPES = {
+      'sick': { name: 'Sick Leave', maxDays: 12, color: '#ef4444' },
+      'vacation': { name: 'Vacation Leave', maxDays: 21, color: '#3b82f6' },
+      'personal': { name: 'Personal Leave', maxDays: 5, color: '#8b5cf6' },
+      'emergency': { name: 'Emergency Leave', maxDays: 3, color: '#f59e0b' },
+      'maternity': { name: 'Maternity Leave', maxDays: 90, color: '#ec4899' },
+      'paternity': { name: 'Paternity Leave', maxDays: 15, color: '#06b6d4' }
+    };
+
+    let leaveData = JSON.parse(localStorage.getItem('leaveData') || '[]');
+    let attendanceData = JSON.parse(localStorage.getItem('attendanceData') || '[]');
+    let employeeData = JSON.parse(localStorage.getItem('employeeData') || '[]');
+
+    function loadHRData() {
+      loadPendingLeaveRequests();
+      loadAllLeaveRequests();
+      loadAttendanceOverview();
+      loadEmployeeAttendance();
+      loadSalaryIntegration();
+    }
+
+    function loadPendingLeaveRequests() {
+      const pendingRequests = leaveData.filter(req => req.status === 'pending');
+      
+      const container = document.getElementById('pendingRequests');
+      if (pendingRequests.length === 0) {
+        container.innerHTML = '<div class="no-data">No pending leave requests</div>';
+        return;
+      }
+
+      container.innerHTML = pendingRequests.map(request => {
+        const leaveType = LEAVE_TYPES[request.type];
+        const daysUntilStart = Math.ceil((new Date(request.startDate) - new Date()) / (1000 * 60 * 60 * 24));
+        
+        return `
+          <div class="pending-request-card">
+            <div class="request-header">
+              <div class="employee-info">
+                <h4>${request.fullName || request.username}</h4>
+                <span class="employee-id">ID: ${request.username}</span>
+              </div>
+              <div class="request-meta">
+                <span class="leave-type-badge" style="background: ${leaveType.color}">${leaveType.name}</span>
+                <span class="days-badge">${request.days} day(s)</span>
+                <span class="urgency-badge ${daysUntilStart <= 3 ? 'urgent' : 'normal'}">
+                  ${daysUntilStart <= 3 ? 'URGENT' : `${daysUntilStart} days`}
+                </span>
+              </div>
+            </div>
+            
+            <div class="request-details">
+              <div class="detail-row">
+                <div class="detail-item">
+                  <i class="fas fa-calendar-alt"></i>
+                  <span>${new Date(request.startDate).toLocaleDateString()} - ${new Date(request.endDate).toLocaleDateString()}</span>
+                </div>
+                <div class="detail-item">
+                  <i class="fas fa-comment"></i>
+                  <span>${request.reason || 'No reason provided'}</span>
+                </div>
+              </div>
+              <div class="detail-row">
+                <div class="detail-item">
+                  <i class="fas fa-clock"></i>
+                  <span>Requested: ${new Date(request.requestedAt).toLocaleDateString()}</span>
+                </div>
+                <div class="detail-item">
+                  <i class="fas fa-user-clock"></i>
+                  <span>Days until start: ${daysUntilStart}</span>
+                </div>
+              </div>
+            </div>
+            
+            <div class="request-actions">
+              <button onclick="approveLeave('${request.id}')" class="primary-btn success">
+                <i class="fas fa-check"></i> Approve
+              </button>
+              <button onclick="rejectLeave('${request.id}')" class="secondary-btn danger">
+                <i class="fas fa-times"></i> Reject
+              </button>
+              <button onclick="viewEmployeeDetails('${request.username}')" class="secondary-btn">
+                <i class="fas fa-user"></i> View Employee
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function loadAllLeaveRequests() {
+      const container = document.getElementById('allLeaveRequests');
+      if (leaveData.length === 0) {
+        container.innerHTML = '<div class="no-data">No leave requests found</div>';
+        return;
+      }
+
+      // Group by status
+      const grouped = leaveData.reduce((acc, req) => {
+        if (!acc[req.status]) acc[req.status] = [];
+        acc[req.status].push(req);
+        return acc;
+      }, {});
+
+      container.innerHTML = Object.entries(grouped).map(([status, requests]) => {
+        const statusClass = status === 'approved' ? 'success' : 
+                           status === 'rejected' ? 'danger' : 'warning';
+        const statusIcon = status === 'approved' ? 'check-circle' : 
+                          status === 'rejected' ? 'times-circle' : 'clock';
+        
+        return `
+          <div class="status-group">
+            <h4 class="status-header ${statusClass}">
+              <i class="fas fa-${statusIcon}"></i>
+              ${status.toUpperCase()} (${requests.length})
+            </h4>
+            <div class="requests-list">
+              ${requests.map(request => {
+                const leaveType = LEAVE_TYPES[request.type];
+                return `
+                  <div class="request-item">
+                    <div class="request-info">
+                      <span class="employee-name">${request.fullName || request.username}</span>
+                      <span class="leave-type" style="color: ${leaveType.color}">${leaveType.name}</span>
+                      <span class="date-range">${new Date(request.startDate).toLocaleDateString()} - ${new Date(request.endDate).toLocaleDateString()}</span>
+                      <span class="days">${request.days} day(s)</span>
+                    </div>
+                    <div class="request-status">
+                      ${request.approvedAt ? `<span class="approved-by">Approved by: ${request.approvedBy}</span>` : ''}
+                      ${request.rejectedAt ? `<span class="rejected-by">Rejected by: ${request.rejectedBy}</span>` : ''}
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function loadAttendanceOverview() {
+      const currentMonth = new Date().getMonth();
+      const currentYear = new Date().getFullYear();
+      
+      // Calculate attendance statistics
+      const monthlyAttendance = attendanceData.filter(att => {
+        const attDate = new Date(att.date);
+        return attDate.getMonth() === currentMonth && attDate.getFullYear() === currentYear;
+      });
+
+      const totalEmployees = new Set(attendanceData.map(att => att.username)).size;
+      const totalPresent = monthlyAttendance.filter(att => att.status === 'present').length;
+      const totalAbsent = monthlyAttendance.filter(att => att.status === 'absent').length;
+      const totalLate = monthlyAttendance.filter(att => att.status === 'late').length;
+      const totalWorkingDays = new Date().getDate();
+      const averageAttendance = totalEmployees > 0 ? ((totalPresent / (totalEmployees * totalWorkingDays)) * 100).toFixed(1) : 0;
+
+      document.getElementById('attendanceOverview').innerHTML = `
+        <div class="overview-stats">
+          <div class="stat-card">
+            <div class="stat-icon" style="background: #16a34a">
+              <i class="fas fa-users"></i>
+            </div>
+            <div class="stat-content">
+              <div class="stat-number">${totalEmployees}</div>
+              <div class="stat-label">Total Employees</div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon" style="background: #3b82f6">
+              <i class="fas fa-check-circle"></i>
+            </div>
+            <div class="stat-content">
+              <div class="stat-number">${totalPresent}</div>
+              <div class="stat-label">Present Days</div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon" style="background: #ef4444">
+              <i class="fas fa-times-circle"></i>
+            </div>
+            <div class="stat-content">
+              <div class="stat-number">${totalAbsent}</div>
+              <div class="stat-label">Absent Days</div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon" style="background: #f59e0b">
+              <i class="fas fa-clock"></i>
+            </div>
+            <div class="stat-content">
+              <div class="stat-number">${totalLate}</div>
+              <div class="stat-label">Late Arrivals</div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon" style="background: #8b5cf6">
+              <i class="fas fa-chart-line"></i>
+            </div>
+            <div class="stat-content">
+              <div class="stat-number">${averageAttendance}%</div>
+              <div class="stat-label">Avg Attendance</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function loadEmployeeAttendance() {
+      const currentMonth = new Date().getMonth();
+      const currentYear = new Date().getFullYear();
+      
+      // Get all employees
+      const allEmployees = [...new Set(attendanceData.map(att => att.username))];
+      
+      const employeeStats = allEmployees.map(username => {
+        const employeeAttendance = attendanceData.filter(att => 
+          att.username === username && 
+          new Date(att.date).getMonth() === currentMonth && 
+          new Date(att.date).getFullYear() === currentYear
+        );
+        
+        const presentDays = employeeAttendance.filter(att => att.status === 'present').length;
+        const absentDays = employeeAttendance.filter(att => att.status === 'absent').length;
+        const lateDays = employeeAttendance.filter(att => att.status === 'late').length;
+        const totalWorkingDays = new Date().getDate();
+        const attendanceRate = totalWorkingDays > 0 ? ((presentDays / totalWorkingDays) * 100).toFixed(1) : 0;
+        
+        return {
+          username,
+          fullName: employeeAttendance[0]?.fullName || username,
+          presentDays,
+          absentDays,
+          lateDays,
+          attendanceRate: parseFloat(attendanceRate)
+        };
+      });
+
+      // Sort by attendance rate (lowest first)
+      employeeStats.sort((a, b) => a.attendanceRate - b.attendanceRate);
+
+      const container = document.getElementById('employeeAttendance');
+      container.innerHTML = employeeStats.map(employee => {
+        const attendanceClass = employee.attendanceRate >= 90 ? 'excellent' : 
+                               employee.attendanceRate >= 80 ? 'good' : 
+                               employee.attendanceRate >= 70 ? 'fair' : 'poor';
+        
+        return `
+          <div class="employee-attendance-card">
+            <div class="employee-info">
+              <div class="employee-name">${employee.fullName}</div>
+              <div class="employee-id">${employee.username}</div>
+            </div>
+            <div class="attendance-stats">
+              <div class="stat-item">
+                <span class="stat-value success">${employee.presentDays}</span>
+                <span class="stat-label">Present</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-value danger">${employee.absentDays}</span>
+                <span class="stat-label">Absent</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-value warning">${employee.lateDays}</span>
+                <span class="stat-label">Late</span>
+              </div>
+            </div>
+            <div class="attendance-rate">
+              <div class="rate-circle ${attendanceClass}">
+                <span class="rate-percentage">${employee.attendanceRate}%</span>
+              </div>
+              <div class="rate-label">Attendance</div>
+            </div>
+            <div class="employee-actions">
+              <button onclick="viewEmployeeAttendance('${employee.username}')" class="secondary-btn small">
+                <i class="fas fa-eye"></i> View Details
+              </button>
+              <button onclick="adjustSalary('${employee.username}', ${employee.attendanceRate})" class="secondary-btn small">
+                <i class="fas fa-dollar-sign"></i> Adjust Salary
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function loadSalaryIntegration() {
+      const currentMonth = new Date().getMonth();
+      const currentYear = new Date().getFullYear();
+      
+      // Calculate salary adjustments based on attendance
+      const salaryAdjustments = [];
+      const allEmployees = [...new Set(attendanceData.map(att => att.username))];
+      
+      allEmployees.forEach(username => {
+        const employeeAttendance = attendanceData.filter(att => 
+          att.username === username && 
+          new Date(att.date).getMonth() === currentMonth && 
+          new Date(att.date).getFullYear() === currentYear
+        );
+        
+        const presentDays = employeeAttendance.filter(att => att.status === 'present').length;
+        const totalWorkingDays = new Date().getDate();
+        const attendanceRate = totalWorkingDays > 0 ? (presentDays / totalWorkingDays) : 0;
+        
+        // Base salary (demo values)
+        const baseSalary = 50000; // $50,000 annual
+        const monthlySalary = baseSalary / 12;
+        
+        // Attendance-based adjustments
+        let adjustment = 0;
+        let adjustmentReason = '';
+        
+        if (attendanceRate >= 0.95) {
+          adjustment = monthlySalary * 0.05; // 5% bonus for excellent attendance
+          adjustmentReason = 'Excellent Attendance Bonus';
+        } else if (attendanceRate < 0.8) {
+          adjustment = -(monthlySalary * 0.1); // 10% deduction for poor attendance
+          adjustmentReason = 'Poor Attendance Deduction';
+        } else if (attendanceRate < 0.9) {
+          adjustment = -(monthlySalary * 0.05); // 5% deduction for below average
+          adjustmentReason = 'Below Average Attendance';
+        }
+        
+        salaryAdjustments.push({
+          username,
+          fullName: employeeAttendance[0]?.fullName || username,
+          baseSalary: monthlySalary,
+          adjustment,
+          finalSalary: monthlySalary + adjustment,
+          attendanceRate: (attendanceRate * 100).toFixed(1),
+          adjustmentReason
+        });
+      });
+
+      const container = document.getElementById('salaryIntegration');
+      container.innerHTML = salaryAdjustments.map(emp => {
+        const adjustmentClass = emp.adjustment > 0 ? 'bonus' : emp.adjustment < 0 ? 'deduction' : 'neutral';
+        
+        return `
+          <div class="salary-card">
+            <div class="employee-info">
+              <div class="employee-name">${emp.fullName}</div>
+              <div class="employee-id">${emp.username}</div>
+              <div class="attendance-rate">${emp.attendanceRate}% Attendance</div>
+            </div>
+            <div class="salary-breakdown">
+              <div class="salary-item">
+                <span class="label">Base Salary:</span>
+                <span class="value">$${emp.baseSalary.toFixed(2)}</span>
+              </div>
+              <div class="salary-item ${adjustmentClass}">
+                <span class="label">Adjustment:</span>
+                <span class="value">${emp.adjustment > 0 ? '+' : ''}$${emp.adjustment.toFixed(2)}</span>
+              </div>
+              <div class="salary-item final">
+                <span class="label">Final Salary:</span>
+                <span class="value">$${emp.finalSalary.toFixed(2)}</span>
+              </div>
+            </div>
+            <div class="adjustment-reason">
+              ${emp.adjustmentReason || 'No adjustment'}
+            </div>
+            <div class="salary-actions">
+              <button onclick="approveSalaryAdjustment('${emp.username}', ${emp.finalSalary})" class="primary-btn small">
+                <i class="fas fa-check"></i> Approve
+              </button>
+              <button onclick="modifySalaryAdjustment('${emp.username}')" class="secondary-btn small">
+                <i class="fas fa-edit"></i> Modify
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function approveLeave(requestId) {
+      const request = leaveData.find(req => req.id === requestId);
+      if (request) {
+        request.status = 'approved';
+        request.approvedAt = new Date().toISOString();
+        request.approvedBy = localStorage.getItem('username');
+        
+        // Deduct from leave balance
+        const balance = JSON.parse(localStorage.getItem(`leaveBalance_${request.username}`) || '{}');
+        balance[request.type] = Math.max(0, balance[request.type] - request.days);
+        localStorage.setItem(`leaveBalance_${request.username}`, JSON.stringify(balance));
+        
+        localStorage.setItem('leaveData', JSON.stringify(leaveData));
+        loadHRData();
+        alert('Leave request approved successfully!');
+      }
+    }
+
+    function rejectLeave(requestId) {
+      const request = leaveData.find(req => req.id === requestId);
+      if (request) {
+        request.status = 'rejected';
+        request.rejectedAt = new Date().toISOString();
+        request.rejectedBy = localStorage.getItem('username');
+        
+        localStorage.setItem('leaveData', JSON.stringify(leaveData));
+        loadHRData();
+        alert('Leave request rejected!');
+      }
+    }
+
+    function viewEmployeeDetails(username) {
+      alert(`Viewing details for employee: ${username}`);
+      // In a real system, this would open a detailed employee profile
+    }
+
+    function viewEmployeeAttendance(username) {
+      alert(`Viewing attendance details for: ${username}`);
+      // In a real system, this would show detailed attendance history
+    }
+
+    function adjustSalary(username, attendanceRate) {
+      const adjustment = prompt(`Adjust salary for ${username} (Current attendance: ${attendanceRate.toFixed(1)}%)`);
+      if (adjustment !== null) {
+        alert(`Salary adjustment recorded for ${username}`);
+      }
+    }
+
+    function approveSalaryAdjustment(username, finalSalary) {
+      alert(`Salary adjustment approved for ${username}: $${finalSalary.toFixed(2)}`);
+    }
+
+    function modifySalaryAdjustment(username) {
+      const newSalary = prompt(`Enter new salary for ${username}:`);
+      if (newSalary !== null && !isNaN(newSalary)) {
+        alert(`Salary modified for ${username}: $${parseFloat(newSalary).toFixed(2)}`);
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', checkAuth);
+  </script>
+  <style>
+    .pending-request-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 16px;
+      box-shadow: var(--shadow);
+      border-left: 4px solid var(--primary);
+    }
+    .request-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 16px;
+    }
+    .employee-info h4 {
+      margin: 0 0 4px 0;
+      font-size: 1.1rem;
+    }
+    .employee-id {
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    .request-meta {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .leave-type-badge {
+      color: white;
+      padding: 4px 8px;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .days-badge {
+      background: #e5e7eb;
+      color: var(--text);
+      padding: 4px 8px;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .urgency-badge {
+      padding: 4px 8px;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .urgency-badge.urgent {
+      background: #fee2e2;
+      color: #dc2626;
+    }
+    .urgency-badge.normal {
+      background: #e5e7eb;
+      color: var(--text);
+    }
+    .request-details {
+      margin-bottom: 16px;
+    }
+    .detail-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 8px;
+    }
+    .detail-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+    .detail-item i {
+      width: 16px;
+      color: var(--primary);
+    }
+    .request-actions {
+      display: flex;
+      gap: 12px;
+      justify-content: flex-end;
+    }
+    .status-group {
+      margin-bottom: 24px;
+    }
+    .status-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-weight: 600;
+    }
+    .status-header.success {
+      background: #dcfce7;
+      color: #166534;
+    }
+    .status-header.danger {
+      background: #fee2e2;
+      color: #dc2626;
+    }
+    .status-header.warning {
+      background: #fef3c7;
+      color: #d97706;
+    }
+    .requests-list {
+      display: grid;
+      gap: 8px;
+    }
+    .request-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    .request-info {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+    }
+    .employee-name {
+      font-weight: 600;
+      min-width: 120px;
+    }
+    .leave-type {
+      font-weight: 600;
+      min-width: 100px;
+    }
+    .date-range {
+      color: var(--muted);
+      min-width: 150px;
+    }
+    .days {
+      color: var(--muted);
+      min-width: 60px;
+    }
+    .overview-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .stat-card {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 20px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .stat-icon {
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 1.2rem;
+    }
+    .stat-content {
+      flex: 1;
+    }
+    .stat-number {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .stat-label {
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    .employee-attendance-card {
+      display: grid;
+      grid-template-columns: 1fr auto auto auto;
+      gap: 20px;
+      align-items: center;
+      padding: 16px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-bottom: 12px;
+    }
+    .employee-info {
+      min-width: 150px;
+    }
+    .employee-name {
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .employee-id {
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    .attendance-stats {
+      display: flex;
+      gap: 16px;
+    }
+    .stat-item {
+      text-align: center;
+    }
+    .stat-value {
+      display: block;
+      font-weight: 700;
+      font-size: 1.1rem;
+    }
+    .stat-value.success { color: #16a34a; }
+    .stat-value.danger { color: #ef4444; }
+    .stat-value.warning { color: #f59e0b; }
+    .stat-label {
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+    .attendance-rate {
+      text-align: center;
+    }
+    .rate-circle {
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 4px;
+      font-weight: 700;
+      font-size: 0.9rem;
+    }
+    .rate-circle.excellent { background: #dcfce7; color: #166534; }
+    .rate-circle.good { background: #dbeafe; color: #1d4ed8; }
+    .rate-circle.fair { background: #fef3c7; color: #d97706; }
+    .rate-circle.poor { background: #fee2e2; color: #dc2626; }
+    .rate-label {
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+    .employee-actions {
+      display: flex;
+      gap: 8px;
+    }
+    .salary-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 16px;
+      box-shadow: var(--shadow);
+    }
+    .salary-breakdown {
+      display: grid;
+      gap: 8px;
+      margin: 12px 0;
+    }
+    .salary-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .salary-item.final {
+      border-bottom: none;
+      font-weight: 700;
+      font-size: 1.1rem;
+    }
+    .salary-item.bonus {
+      color: #16a34a;
+    }
+    .salary-item.deduction {
+      color: #ef4444;
+    }
+    .adjustment-reason {
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+    .salary-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="header-content">
+      <h1><i class="fas fa-users-cog"></i> HR Leave & Attendance Management</h1>
+      <div class="user-info">
+        <span id="currentUser">Loading...</span>
+        <button onclick="logout()" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</button>
+      </div>
+    </div>
+  </header>
+  
+  <div class="container">
+    <nav class="sidebar">
+      <div class="sidebar-header"><i class="fas fa-user-tie"></i><span>HR Portal</span></div>
+      <ul class="nav-links">
+        <li><a href="hr-dashboard.html"><i class="fas fa-gauge"></i><span>HR Dashboard</span></a></li>
+        <li><a href="employee-directory.html"><i class="fas fa-users"></i><span>Directory</span></a></li>
+        <li class="active"><a href="hr-leave-attendance.html"><i class="fas fa-calendar-alt"></i><span>Leave & Attendance</span></a></li>
+        <li><a href="performance-reviews.html"><i class="fas fa-chart-line"></i><span>Performance</span></a></li>
+        <li><a href="audit-compliance.html"><i class="fas fa-shield-alt"></i><span>Audit</span></a></li>
+        <li><a href="crypto-payroll.html"><i class="fas fa-coins"></i><span>Crypto Payroll</span></a></li>
+      </ul>
+    </nav>
+    
+    <main class="main-content">
+      <!-- Pending Leave Requests -->
+      <div class="content-section">
+        <div class="section-header">
+          <h3><i class="fas fa-clock"></i> Pending Leave Requests</h3>
+        </div>
+        <div id="pendingRequests"></div>
+      </div>
+
+      <!-- Attendance Overview -->
+      <div class="content-section">
+        <div class="section-header">
+          <h3><i class="fas fa-chart-bar"></i> Attendance Overview (This Month)</h3>
+        </div>
+        <div id="attendanceOverview"></div>
+      </div>
+
+      <!-- Employee Attendance -->
+      <div class="content-section">
+        <div class="section-header">
+          <h3><i class="fas fa-users"></i> Employee Attendance Summary</h3>
+        </div>
+        <div id="employeeAttendance"></div>
+      </div>
+
+      <!-- Salary Integration -->
+      <div class="content-section">
+        <div class="section-header">
+          <h3><i class="fas fa-dollar-sign"></i> Salary Integration Based on Attendance</h3>
+        </div>
+        <div id="salaryIntegration"></div>
+      </div>
+
+      <!-- All Leave Requests -->
+      <div class="content-section">
+        <div class="section-header">
+          <h3><i class="fas fa-list"></i> All Leave Requests</h3>
+        </div>
+        <div id="allLeaveRequests"></div>
+      </div>
+    </main>
+  </div>
+
+  <footer><p>&copy; 2025 PayrollPro by Aaron | HR Leave & Attendance Management</p></footer>
+</body>
+</html>

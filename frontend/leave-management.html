@@ -3,302 +3,475 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Leave Management - Payroll Management</title>
+  <title>Leave Management - PayrollPro</title>
   <link rel="stylesheet" href="style.css">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <script src="navigation-enhancer.js"></script>
+  <script src="init-demo-data.js"></script>
   <script>
-    function logout(){ localStorage.removeItem('authToken'); localStorage.removeItem('userRole'); localStorage.removeItem('username'); localStorage.removeItem('fullName'); window.location.href='login.html'; }
-    function checkAuth(){ const t=localStorage.getItem('authToken'); const r=localStorage.getItem('userRole'); const u=localStorage.getItem('username'); if(!t||!r||!u){ window.location.href='login.html'; return; } document.getElementById('currentUser').innerHTML=`<span>${localStorage.getItem('fullName') || u}</span><span class="role-badge">${r.toUpperCase()}</span>`; document.body.classList.add('employee-theme'); loadLeaveData(); }
-    
+    function logout(){ localStorage.removeItem('authToken'); localStorage.removeItem('userRole'); localStorage.removeItem('username'); localStorage.removeItem('fullName'); window.location.href='../login.html'; }
+    function checkAuth(){ const t=localStorage.getItem('authToken'); const r=localStorage.getItem('userRole'); const u=localStorage.getItem('username'); if(!t||!r||!u){ window.location.href='../login.html'; return; } document.getElementById('currentUser').innerHTML=`<span>${localStorage.getItem('fullName') || u}</span><span class="role-badge">${r.toUpperCase()}</span>`; document.body.classList.add('employee-theme'); loadLeaveData(); loadAttendanceData(); }
+
+    // Leave Management System
+    const LEAVE_TYPES = {
+      'sick': { name: 'Sick Leave', maxDays: 12, color: '#ef4444' },
+      'vacation': { name: 'Vacation Leave', maxDays: 21, color: '#3b82f6' },
+      'personal': { name: 'Personal Leave', maxDays: 5, color: '#8b5cf6' },
+      'emergency': { name: 'Emergency Leave', maxDays: 3, color: '#f59e0b' },
+      'maternity': { name: 'Maternity Leave', maxDays: 90, color: '#ec4899' },
+      'paternity': { name: 'Paternity Leave', maxDays: 15, color: '#06b6d4' }
+    };
+
+    let leaveData = JSON.parse(localStorage.getItem('leaveData') || '[]');
+    let attendanceData = JSON.parse(localStorage.getItem('attendanceData') || '[]');
+
     function loadLeaveData() {
-        const username = localStorage.getItem('username');
-        loadLeaveBalance(username);
-        loadLeaveRequests(username);
-        loadLeaveHistory(username);
+      const username = localStorage.getItem('username');
+      const userRole = localStorage.getItem('userRole');
+      
+      // Load leave balance
+      loadLeaveBalance(username);
+      
+      // Load leave requests
+      loadLeaveRequests(username, userRole);
     }
-    
+
     function loadLeaveBalance(username) {
-        const balance = JSON.parse(localStorage.getItem(`leaveBalance_${username}`) || '[]');
-        if (balance.length === 0) {
-            const demoBalance = {
-                vacation: 20,
-                sick: 10,
-                personal: 5,
-                total: 35
-            };
-            localStorage.setItem(`leaveBalance_${username}`, JSON.stringify(demoBalance));
-            displayLeaveBalance(demoBalance);
-        } else {
-            displayLeaveBalance(balance);
-        }
+      const balance = JSON.parse(localStorage.getItem(`leaveBalance_${username}`) || JSON.stringify({
+        sick: 12,
+        vacation: 21,
+        personal: 5,
+        emergency: 3,
+        maternity: 90,
+        paternity: 15
+      }));
+
+      const balanceContainer = document.getElementById('leaveBalance');
+      balanceContainer.innerHTML = Object.entries(balance).map(([type, days]) => {
+        const leaveType = LEAVE_TYPES[type];
+        const percentage = (days / leaveType.maxDays) * 100;
+        return `
+          <div class="leave-balance-item">
+            <div class="leave-type-header">
+              <span class="leave-type-name" style="color: ${leaveType.color}">${leaveType.name}</span>
+              <span class="leave-days">${days}/${leaveType.maxDays} days</span>
+            </div>
+            <div class="progress-bar">
+              <div class="progress-fill" style="width: ${percentage}%; background: ${leaveType.color}"></div>
+            </div>
+          </div>
+        `;
+      }).join('');
     }
-    
-    function displayLeaveBalance(balance) {
-        document.getElementById('vacationDays').textContent = balance.vacation;
-        document.getElementById('sickDays').textContent = balance.sick;
-        document.getElementById('personalDays').textContent = balance.personal;
-        document.getElementById('totalDays').textContent = balance.total;
-    }
-    
-    function loadLeaveRequests(username) {
-        const requests = JSON.parse(localStorage.getItem(`leaveRequests_${username}`) || '[]');
-        if (requests.length === 0) {
-            const demoRequests = [
-                {
-                    id: 1,
-                    type: 'Vacation',
-                    startDate: '2025-04-01',
-                    endDate: '2025-04-03',
-                    days: 3,
-                    status: 'Pending',
-                    reason: 'Family vacation',
-                    submittedDate: '2025-03-20'
-                },
-                {
-                    id: 2,
-                    type: 'Sick',
-                    startDate: '2025-03-15',
-                    endDate: '2025-03-15',
-                    days: 1,
-                    status: 'Approved',
-                    reason: 'Doctor appointment',
-                    submittedDate: '2025-03-10'
-                }
-            ];
-            localStorage.setItem(`leaveRequests_${username}`, JSON.stringify(demoRequests));
-            displayLeaveRequests(demoRequests);
-        } else {
-            displayLeaveRequests(requests);
-        }
-    }
-    
-    function displayLeaveRequests(requests) {
-        const tbody = document.getElementById('requestsBody');
-        if (requests.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" class="no-data">No leave requests found</td></tr>';
-            return;
-        }
+
+    function loadLeaveRequests(username, userRole) {
+      const requests = leaveData.filter(req => 
+        userRole === 'hr' || userRole === 'admin' || req.username === username
+      );
+
+      const requestsContainer = document.getElementById('leaveRequests');
+      if (requests.length === 0) {
+        requestsContainer.innerHTML = '<div class="no-data">No leave requests found</div>';
+        return;
+      }
+
+      requestsContainer.innerHTML = requests.map(request => {
+        const leaveType = LEAVE_TYPES[request.type];
+        const statusClass = request.status === 'approved' ? 'success' : 
+                           request.status === 'rejected' ? 'danger' : 'warning';
+        const canApprove = (userRole === 'hr' || userRole === 'admin') && request.status === 'pending';
         
-        tbody.innerHTML = requests.map(request => `
-            <tr>
-                <td>${request.type}</td>
-                <td>${new Date(request.startDate).toLocaleDateString()}</td>
-                <td>${new Date(request.endDate).toLocaleDateString()}</td>
-                <td>${request.days}</td>
-                <td><span class="status-badge ${getStatusClass(request.status)}">${request.status}</span></td>
-                <td>
-                    <button class="secondary-btn small" onclick="viewRequestDetails(${request.id})">
-                        <i class="fas fa-eye"></i> View
+        return `
+          <div class="leave-request-card">
+            <div class="request-header">
+              <div class="request-info">
+                <h4>${request.fullName || request.username}</h4>
+                <span class="leave-type-badge" style="background: ${leaveType.color}">${leaveType.name}</span>
+              </div>
+              <div class="request-status">
+                <span class="status-badge ${statusClass}">${request.status.toUpperCase()}</span>
+                ${canApprove ? `
+                  <div class="approval-buttons">
+                    <button onclick="approveLeave('${request.id}')" class="secondary-btn small success">
+                      <i class="fas fa-check"></i> Approve
                     </button>
-                    ${request.status === 'Pending' ? `<button class="danger small" onclick="cancelRequest(${request.id})"><i class="fas fa-times"></i> Cancel</button>` : ''}
-                </td>
-            </tr>
-        `).join('');
+                    <button onclick="rejectLeave('${request.id}')" class="secondary-btn small danger">
+                      <i class="fas fa-times"></i> Reject
+                    </button>
+                  </div>
+                ` : ''}
+              </div>
+            </div>
+            <div class="request-details">
+              <div class="detail-item">
+                <i class="fas fa-calendar-alt"></i>
+                <span>${new Date(request.startDate).toLocaleDateString()} - ${new Date(request.endDate).toLocaleDateString()}</span>
+              </div>
+              <div class="detail-item">
+                <i class="fas fa-clock"></i>
+                <span>${request.days} day(s)</span>
+              </div>
+              <div class="detail-item">
+                <i class="fas fa-comment"></i>
+                <span>${request.reason || 'No reason provided'}</span>
+              </div>
+              <div class="detail-item">
+                <i class="fas fa-calendar-plus"></i>
+                <span>Requested: ${new Date(request.requestedAt).toLocaleDateString()}</span>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
     }
-    
-    function loadLeaveHistory(username) {
-        const history = JSON.parse(localStorage.getItem(`leaveHistory_${username}`) || '[]');
-        if (history.length === 0) {
-            const demoHistory = [
-                {
-                    id: 3,
-                    type: 'Vacation',
-                    startDate: '2025-02-15',
-                    endDate: '2025-02-17',
-                    days: 3,
-                    status: 'Approved',
-                    reason: 'Personal time off'
-                },
-                {
-                    id: 4,
-                    type: 'Sick',
-                    startDate: '2025-01-20',
-                    endDate: '2025-01-20',
-                    days: 1,
-                    status: 'Approved',
-                    reason: 'Illness'
-                }
-            ];
-            localStorage.setItem(`leaveHistory_${username}`, JSON.stringify(demoHistory));
-            displayLeaveHistory(demoHistory);
-        } else {
-            displayLeaveHistory(history);
-        }
+
+    function loadAttendanceData() {
+      const username = localStorage.getItem('username');
+      const userRole = localStorage.getItem('userRole');
+      
+      // Load attendance summary
+      loadAttendanceSummary(username);
+      
+      // Load attendance history
+      loadAttendanceHistory(username, userRole);
     }
-    
-    function displayLeaveHistory(history) {
-        const tbody = document.getElementById('historyBody');
-        if (history.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" class="no-data">No leave history found</td></tr>';
-            return;
-        }
-        
-        tbody.innerHTML = history.map(entry => `
-            <tr>
-                <td>${entry.type}</td>
-                <td>${new Date(entry.startDate).toLocaleDateString()}</td>
-                <td>${new Date(entry.endDate).toLocaleDateString()}</td>
-                <td>${entry.days}</td>
-                <td><span class="status-badge ${getStatusClass(entry.status)}">${entry.status}</span></td>
-            </tr>
-        `).join('');
+
+    function loadAttendanceSummary(username) {
+      const userAttendance = attendanceData.filter(att => att.username === username);
+      const currentMonth = new Date().getMonth();
+      const currentYear = new Date().getFullYear();
+      
+      const monthAttendance = userAttendance.filter(att => {
+        const attDate = new Date(att.date);
+        return attDate.getMonth() === currentMonth && attDate.getFullYear() === currentYear;
+      });
+
+      const presentDays = monthAttendance.filter(att => att.status === 'present').length;
+      const absentDays = monthAttendance.filter(att => att.status === 'absent').length;
+      const lateDays = monthAttendance.filter(att => att.status === 'late').length;
+      const totalWorkingDays = new Date().getDate(); // Simplified calculation
+
+      document.getElementById('attendanceSummary').innerHTML = `
+        <div class="attendance-stats">
+          <div class="stat-item">
+            <div class="stat-number" style="color: #16a34a">${presentDays}</div>
+            <div class="stat-label">Present</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-number" style="color: #ef4444">${absentDays}</div>
+            <div class="stat-label">Absent</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-number" style="color: #f59e0b">${lateDays}</div>
+            <div class="stat-label">Late</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-number" style="color: #3b82f6">${((presentDays / totalWorkingDays) * 100).toFixed(1)}%</div>
+            <div class="stat-label">Attendance</div>
+          </div>
+        </div>
+      `;
     }
-    
-    function getStatusClass(status) {
-        switch(status) {
-            case 'Approved': return 'success';
-            case 'Pending': return 'warning';
-            case 'Rejected': return 'danger';
-            default: return 'warning';
-        }
+
+    function loadAttendanceHistory(username, userRole) {
+      const userAttendance = attendanceData.filter(att => 
+        userRole === 'hr' || userRole === 'admin' || att.username === username
+      );
+
+      const historyContainer = document.getElementById('attendanceHistory');
+      if (userAttendance.length === 0) {
+        historyContainer.innerHTML = '<div class="no-data">No attendance records found</div>';
+        return;
+      }
+
+      // Group by month
+      const groupedAttendance = userAttendance.reduce((acc, att) => {
+        const month = new Date(att.date).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+        if (!acc[month]) acc[month] = [];
+        acc[month].push(att);
+        return acc;
+      }, {});
+
+      historyContainer.innerHTML = Object.entries(groupedAttendance).map(([month, records]) => `
+        <div class="attendance-month">
+          <h4>${month}</h4>
+          <div class="attendance-grid">
+            ${records.map(record => {
+              const statusClass = record.status === 'present' ? 'success' : 
+                                 record.status === 'absent' ? 'danger' : 'warning';
+              return `
+                <div class="attendance-day ${statusClass}">
+                  <div class="day-date">${new Date(record.date).getDate()}</div>
+                  <div class="day-status">${record.status}</div>
+                  ${record.checkIn ? `<div class="day-time">${record.checkIn}</div>` : ''}
+                  ${record.checkOut ? `<div class="day-time">${record.checkOut}</div>` : ''}
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      `).join('');
     }
-    
-    function openNewRequestModal() {
-        document.getElementById('newRequestModal').style.display = 'block';
+
+    function openLeaveRequestModal() {
+      document.getElementById('leaveRequestModal').style.display = 'block';
     }
-    
-    function closeNewRequestModal() {
-        document.getElementById('newRequestModal').style.display = 'none';
-        document.getElementById('newRequestForm').reset();
+
+    function closeLeaveRequestModal() {
+      document.getElementById('leaveRequestModal').style.display = 'none';
+      document.getElementById('leaveRequestForm').reset();
     }
-    
+
     function submitLeaveRequest(e) {
-        e.preventDefault();
-        
-        const form = e.target;
-        const formData = new FormData(form);
-        
-        const request = {
-            id: Date.now(),
-            type: formData.get('type'),
-            startDate: formData.get('startDate'),
-            endDate: formData.get('endDate'),
-            days: calculateDays(formData.get('startDate'), formData.get('endDate')),
-            status: 'Pending',
-            reason: formData.get('reason'),
-            submittedDate: new Date().toISOString().split('T')[0]
-        };
-        
-        const username = localStorage.getItem('username');
-        const requests = JSON.parse(localStorage.getItem(`leaveRequests_${username}`) || '[]');
-        requests.unshift(request);
-        localStorage.setItem(`leaveRequests_${username}`, JSON.stringify(requests));
-        
-        // Update leave balance
-        updateLeaveBalance(request.type, request.days);
-        
-        loadLeaveRequests(username);
-        closeNewRequestModal();
-        
-        alert('Leave request submitted successfully!');
+      e.preventDefault();
+      const form = e.target;
+      const formData = new FormData(form);
+      
+      const request = {
+        id: 'req_' + Date.now(),
+        username: localStorage.getItem('username'),
+        fullName: localStorage.getItem('fullName') || localStorage.getItem('username'),
+        type: formData.get('leaveType'),
+        startDate: formData.get('startDate'),
+        endDate: formData.get('endDate'),
+        days: calculateDays(formData.get('startDate'), formData.get('endDate')),
+        reason: formData.get('reason'),
+        status: 'pending',
+        requestedAt: new Date().toISOString()
+      };
+
+      // Check leave balance
+      const username = localStorage.getItem('username');
+      const balance = JSON.parse(localStorage.getItem(`leaveBalance_${username}`) || '{}');
+      const leaveType = LEAVE_TYPES[request.type];
+      
+      if (balance[request.type] < request.days) {
+        alert(`Insufficient ${leaveType.name} balance. Available: ${balance[request.type]} days`);
+        return;
+      }
+
+      leaveData.push(request);
+      localStorage.setItem('leaveData', JSON.stringify(leaveData));
+      
+      closeLeaveRequestModal();
+      loadLeaveData();
+      
+      alert('Leave request submitted successfully!');
     }
-    
+
     function calculateDays(startDate, endDate) {
-        const start = new Date(startDate);
-        const end = new Date(endDate);
-        const diffTime = Math.abs(end - start);
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        return diffDays + 1; // Include both start and end dates
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      const diffTime = Math.abs(end - start);
+      return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
     }
-    
-    function updateLeaveBalance(type, days) {
-        const username = localStorage.getItem('username');
-        const balance = JSON.parse(localStorage.getItem(`leaveBalance_${username}`) || '{}');
+
+    function approveLeave(requestId) {
+      const request = leaveData.find(req => req.id === requestId);
+      if (request) {
+        request.status = 'approved';
+        request.approvedAt = new Date().toISOString();
+        request.approvedBy = localStorage.getItem('username');
         
-        if (balance[type.toLowerCase()] !== undefined) {
-            balance[type.toLowerCase()] -= days;
-            balance.total -= days;
-            localStorage.setItem(`leaveBalance_${username}`, JSON.stringify(balance));
-            displayLeaveBalance(balance);
+        // Deduct from leave balance
+        const balance = JSON.parse(localStorage.getItem(`leaveBalance_${request.username}`) || '{}');
+        balance[request.type] = Math.max(0, balance[request.type] - request.days);
+        localStorage.setItem(`leaveBalance_${request.username}`, JSON.stringify(balance));
+        
+        localStorage.setItem('leaveData', JSON.stringify(leaveData));
+        loadLeaveData();
+        alert('Leave request approved!');
+      }
+    }
+
+    function rejectLeave(requestId) {
+      const request = leaveData.find(req => req.id === requestId);
+      if (request) {
+        request.status = 'rejected';
+        request.rejectedAt = new Date().toISOString();
+        request.rejectedBy = localStorage.getItem('username');
+        
+        localStorage.setItem('leaveData', JSON.stringify(leaveData));
+        loadLeaveData();
+        alert('Leave request rejected!');
+      }
+    }
+
+    function markAttendance() {
+      const username = localStorage.getItem('username');
+      const today = new Date().toISOString().split('T')[0];
+      const now = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+      
+      // Check if already marked today
+      const existingRecord = attendanceData.find(att => 
+        att.username === username && att.date === today
+      );
+      
+      if (existingRecord) {
+        if (existingRecord.checkOut) {
+          alert('You have already marked attendance for today!');
+          return;
         }
-    }
-    
-    function viewRequestDetails(requestId) {
-        const username = localStorage.getItem('username');
-        const requests = JSON.parse(localStorage.getItem(`leaveRequests_${username}`) || '[]');
-        const request = requests.find(r => r.id === requestId);
-        
-        if (!request) return;
-        
-        document.getElementById('detailType').textContent = request.type;
-        document.getElementById('detailStart').textContent = new Date(request.startDate).toLocaleDateString();
-        document.getElementById('detailEnd').textContent = new Date(request.endDate).toLocaleDateString();
-        document.getElementById('detailDays').textContent = request.days;
-        document.getElementById('detailStatus').textContent = request.status;
-        document.getElementById('detailReason').textContent = request.reason;
-        document.getElementById('detailSubmitted').textContent = new Date(request.submittedDate).toLocaleDateString();
-        
-        document.getElementById('requestDetailsModal').style.display = 'block';
-    }
-    
-    function closeRequestDetailsModal() {
-        document.getElementById('requestDetailsModal').style.display = 'none';
-    }
-    
-    function cancelRequest(requestId) {
-        if (!confirm('Are you sure you want to cancel this leave request?')) return;
-        
-        const username = localStorage.getItem('username');
-        const requests = JSON.parse(localStorage.getItem(`leaveRequests_${username}`) || '[]');
-        const request = requests.find(r => r.id === requestId);
-        
-        if (request) {
-            // Restore leave balance
-            const balance = JSON.parse(localStorage.getItem(`leaveBalance_${username}`) || '{}');
-            balance[request.type.toLowerCase()] += request.days;
-            balance.total += request.days;
-            localStorage.setItem(`leaveBalance_${username}`, JSON.stringify(balance));
-            displayLeaveBalance(balance);
-            
-            // Remove request
-            const filtered = requests.filter(r => r.id !== requestId);
-            localStorage.setItem(`leaveRequests_${username}`, JSON.stringify(filtered));
-            loadLeaveRequests(username);
-        }
-    }
-    
-    // Close modals when clicking outside
-    window.onclick = function(event) {
-        const modals = [
-            document.getElementById('newRequestModal'),
-            document.getElementById('requestDetailsModal')
-        ];
-        modals.forEach(modal => {
-            if (event.target === modal) {
-                modal.style.display = 'none';
-            }
+        // Mark check out
+        existingRecord.checkOut = now;
+        existingRecord.status = 'present';
+      } else {
+        // Mark check in
+        const isLate = new Date().getHours() > 9; // Late after 9 AM
+        attendanceData.push({
+          id: 'att_' + Date.now(),
+          username: username,
+          fullName: localStorage.getItem('fullName') || username,
+          date: today,
+          checkIn: now,
+          status: isLate ? 'late' : 'present'
         });
+      }
+      
+      localStorage.setItem('attendanceData', JSON.stringify(attendanceData));
+      loadAttendanceData();
+      alert(existingRecord ? 'Check out marked successfully!' : 'Check in marked successfully!');
     }
-    
+
     document.addEventListener('DOMContentLoaded', checkAuth);
   </script>
   <style>
-    .balance-cards {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-      gap: 15px;
-      margin-bottom: 20px;
+    .leave-balance-item {
+      margin-bottom: 16px;
     }
-    .balance-card {
+    .leave-type-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .leave-type-name {
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+    .leave-days {
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    .progress-bar {
+      height: 8px;
+      background: #e5e7eb;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      transition: width 0.3s ease;
+    }
+    .leave-request-card {
       background: var(--card);
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      padding: 15px;
-      text-align: center;
+      padding: 16px;
+      margin-bottom: 12px;
       box-shadow: var(--shadow);
     }
-    .balance-card h4 {
-      margin: 0 0 8px;
-      color: var(--muted);
-      font-size: 0.9rem;
+    .request-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 12px;
     }
-    .balance-card .days {
-      font-size: 2rem;
-      font-weight: bold;
+    .request-info h4 {
+      margin: 0 0 4px 0;
+      font-size: 1rem;
+    }
+    .leave-type-badge {
+      color: white;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .approval-buttons {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .request-details {
+      display: grid;
+      gap: 8px;
+    }
+    .detail-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+    .detail-item i {
+      width: 16px;
       color: var(--primary);
     }
-    .balance-card .label {
+    .attendance-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .stat-item {
+      text-align: center;
+      padding: 16px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+    .stat-number {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .stat-label {
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    .attendance-month {
+      margin-bottom: 24px;
+    }
+    .attendance-month h4 {
+      margin: 0 0 12px 0;
+      color: var(--text);
+    }
+    .attendance-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+      gap: 8px;
+    }
+    .attendance-day {
+      padding: 8px;
+      border-radius: 8px;
+      text-align: center;
       font-size: 0.8rem;
+      border: 1px solid var(--border);
+    }
+    .attendance-day.success {
+      background: #dcfce7;
+      border-color: #16a34a;
+    }
+    .attendance-day.danger {
+      background: #fee2e2;
+      border-color: #ef4444;
+    }
+    .attendance-day.warning {
+      background: #fef3c7;
+      border-color: #f59e0b;
+    }
+    .day-date {
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+    .day-status {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      margin-bottom: 2px;
+    }
+    .day-time {
+      font-size: 0.7rem;
       color: var(--muted);
     }
   </style>
@@ -306,7 +479,7 @@
 <body>
   <header class="header">
     <div class="header-content">
-      <h1><i class="fas fa-calendar-alt"></i> Leave Management</h1>
+      <h1><i class="fas fa-calendar-alt"></i> Leave & Attendance Management</h1>
       <div class="user-info">
         <span id="currentUser">Loading...</span>
         <button onclick="logout()" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</button>
@@ -316,186 +489,100 @@
   
   <div class="container">
     <nav class="sidebar">
-      <div class="sidebar-header"><i class="fas fa-user-tie"></i><span>Employee Portal</span></div>
+      <div class="sidebar-header"><i class="fas fa-user-tie"></i><span>Portal</span></div>
       <ul class="nav-links">
-        <li><a href="employee-dashboard.html"><i class="fas fa-tachometer-alt"></i><span>Dashboard</span></a></li>
-        <li><a href="employee-reports.html"><i class="fas fa-file-alt"></i><span>My Reports</span></a></li>
+        <li><a href="employee-dashboard.html"><i class="fas fa-gauge"></i><span>Dashboard</span></a></li>
         <li><a href="employee-profile.html"><i class="fas fa-user-cog"></i><span>Profile</span></a></li>
+        <li class="active"><a href="leave-management.html"><i class="fas fa-calendar-alt"></i><span>Leave & Attendance</span></a></li>
         <li><a href="time-tracking.html"><i class="fas fa-clock"></i><span>Time Tracking</span></a></li>
         <li><a href="employee-directory.html"><i class="fas fa-users"></i><span>Directory</span></a></li>
-        <li class="active"><a href="leave-management.html"><i class="fas fa-calendar-alt"></i><span>Leave</span></a></li>
+        <li><a href="crypto-payroll.html"><i class="fas fa-coins"></i><span>Crypto Payroll</span></a></li>
       </ul>
     </nav>
     
     <main class="main-content">
-      <div class="page-header">
-        <h2><i class="fas fa-calendar-alt"></i> Leave Management</h2>
-        <p>Manage your leave requests and track your leave balance.</p>
-      </div>
-      
-      <!-- Leave Balance -->
+      <!-- Leave Balance Section -->
       <div class="content-section">
         <div class="section-header">
           <h3><i class="fas fa-chart-pie"></i> Leave Balance</h3>
         </div>
-        <div class="balance-cards">
-          <div class="balance-card">
-            <h4>Vacation Days</h4>
-            <div class="days" id="vacationDays">20</div>
-            <div class="label">days remaining</div>
-          </div>
-          <div class="balance-card">
-            <h4>Sick Days</h4>
-            <div class="days" id="sickDays">10</div>
-            <div class="label">days remaining</div>
-          </div>
-          <div class="balance-card">
-            <h4>Personal Days</h4>
-            <div class="days" id="personalDays">5</div>
-            <div class="label">days remaining</div>
-          </div>
-          <div class="balance-card">
-            <h4>Total</h4>
-            <div class="days" id="totalDays">35</div>
-            <div class="label">days remaining</div>
-          </div>
-        </div>
+        <div id="leaveBalance"></div>
       </div>
-      
-      <!-- New Request Button -->
+
+      <!-- Attendance Summary -->
       <div class="content-section">
         <div class="section-header">
-          <h3><i class="fas fa-plus"></i> Leave Requests</h3>
-          <button onclick="openNewRequestModal()" class="primary-btn">
-            <i class="fas fa-plus"></i> New Request
+          <h3><i class="fas fa-chart-bar"></i> Attendance Summary (This Month)</h3>
+          <button onclick="markAttendance()" class="primary-btn">
+            <i class="fas fa-clock"></i> Mark Attendance
           </button>
         </div>
-        <div class="table-container">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Type</th>
-                <th>Start Date</th>
-                <th>End Date</th>
-                <th>Days</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="requestsBody">
-              <!-- Data will be populated here -->
-            </tbody>
-          </table>
-        </div>
+        <div id="attendanceSummary"></div>
       </div>
-      
-      <!-- Leave History -->
+
+      <!-- Leave Requests -->
       <div class="content-section">
         <div class="section-header">
-          <h3><i class="fas fa-history"></i> Leave History</h3>
+          <h3><i class="fas fa-file-alt"></i> Leave Requests</h3>
+          <button onclick="openLeaveRequestModal()" class="primary-btn">
+            <i class="fas fa-plus"></i> Request Leave
+          </button>
         </div>
-        <div class="table-container">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Type</th>
-                <th>Start Date</th>
-                <th>End Date</th>
-                <th>Days</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody id="historyBody">
-              <!-- Data will be populated here -->
-            </tbody>
-          </table>
+        <div id="leaveRequests"></div>
+      </div>
+
+      <!-- Attendance History -->
+      <div class="content-section">
+        <div class="section-header">
+          <h3><i class="fas fa-history"></i> Attendance History</h3>
         </div>
+        <div id="attendanceHistory"></div>
       </div>
     </main>
   </div>
-  
-  <footer><p>&copy; 2025 PayrollPro by Aaron | Leave Management</p></footer>
-  
-  <!-- New Request Modal -->
-  <div id="newRequestModal" class="modal">
+
+  <!-- Leave Request Modal -->
+  <div id="leaveRequestModal" class="modal">
     <div class="modal-content">
       <div class="modal-header">
-        <h3><i class="fas fa-plus"></i> New Leave Request</h3>
-        <span class="close" onclick="closeNewRequestModal()">&times;</span>
+        <h3><i class="fas fa-calendar-plus"></i> Request Leave</h3>
+        <span class="close" onclick="closeLeaveRequestModal()">&times;</span>
       </div>
-      <form id="newRequestForm" onsubmit="submitLeaveRequest(event)">
+      <form id="leaveRequestForm" onsubmit="submitLeaveRequest(event)">
         <div class="form-grid">
           <div class="form-group">
-            <label for="type">Leave Type</label>
-            <select name="type" required>
-              <option value="">Select type...</option>
-              <option value="Vacation">Vacation</option>
-              <option value="Sick">Sick</option>
-              <option value="Personal">Personal</option>
+            <label>Leave Type</label>
+            <select name="leaveType" required>
+              <option value="">Select leave type...</option>
+              <option value="sick">Sick Leave</option>
+              <option value="vacation">Vacation Leave</option>
+              <option value="personal">Personal Leave</option>
+              <option value="emergency">Emergency Leave</option>
+              <option value="maternity">Maternity Leave</option>
+              <option value="paternity">Paternity Leave</option>
             </select>
           </div>
           <div class="form-group">
-            <label for="startDate">Start Date</label>
+            <label>Start Date</label>
             <input type="date" name="startDate" required>
           </div>
           <div class="form-group">
-            <label for="endDate">End Date</label>
+            <label>End Date</label>
             <input type="date" name="endDate" required>
           </div>
           <div class="form-group">
-            <label for="reason">Reason</label>
+            <label>Reason</label>
             <textarea name="reason" rows="3" placeholder="Please provide a reason for your leave request..."></textarea>
           </div>
         </div>
         <div class="modal-actions">
-          <button type="button" onclick="closeNewRequestModal()" class="secondary-btn">Cancel</button>
-          <button type="submit" class="primary-btn">Submit Request</button>
+          <button type="button" class="secondary-btn" onclick="closeLeaveRequestModal()">Cancel</button>
+          <button type="submit" class="primary-btn"><i class="fas fa-paper-plane"></i> Submit Request</button>
         </div>
       </form>
     </div>
   </div>
-  
-  <!-- Request Details Modal -->
-  <div id="requestDetailsModal" class="modal">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h3><i class="fas fa-eye"></i> Request Details</h3>
-        <span class="close" onclick="closeRequestDetailsModal()">&times;</span>
-      </div>
-      <div class="modal-grid">
-        <div class="modal-field">
-          <label>Leave Type</label>
-          <span id="detailType">-</span>
-        </div>
-        <div class="modal-field">
-          <label>Start Date</label>
-          <span id="detailStart">-</span>
-        </div>
-        <div class="modal-field">
-          <label>End Date</label>
-          <span id="detailEnd">-</span>
-        </div>
-        <div class="modal-field">
-          <label>Days</label>
-          <span id="detailDays">-</span>
-        </div>
-        <div class="modal-field">
-          <label>Status</label>
-          <span id="detailStatus">-</span>
-        </div>
-        <div class="modal-field">
-          <label>Submitted Date</label>
-          <span id="detailSubmitted">-</span>
-        </div>
-      </div>
-      <div class="modal-field">
-        <label>Reason</label>
-        <span id="detailReason">-</span>
-      </div>
-      <div class="modal-actions">
-        <button onclick="closeRequestDetailsModal()" class="primary-btn">Close</button>
-      </div>
-    </div>
-  </div>
+
+  <footer><p>&copy; 2025 PayrollPro by Aaron | Leave & Attendance Management</p></footer>
 </body>
 </html>
