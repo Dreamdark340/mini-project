@@ -6,18 +6,59 @@
   <title>Login - Payroll Management</title>
   <link rel="stylesheet" href="style.css">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-  <script src="demo-walkthrough.js"></script>
   <script>
     function showError(msg){ const el=document.getElementById('errorBox'); el.textContent=msg; el.style.display='block'; }
     function clearError(){ const el=document.getElementById('errorBox'); el.style.display='none'; el.textContent=''; }
 
-    // Demo users data
-    const demoUsers = {
-      'aaron': { password: 'password', role: 'employee', fullName: 'Aaron Employee' },
-      'hr1': { password: 'password', role: 'hr', fullName: 'Harper HR' },
-      'admin': { password: 'admin123', role: 'admin', fullName: 'Alex Admin' },
-      'crypto1': { password: 'crypto123', role: 'crypto-trader', fullName: 'Crypto Trader' }
-    };
+    // Real authentication system
+    const API_BASE = 'http://localhost:4000/api';
+    
+    // User registration and authentication functions
+    async function authenticateUser(username, password) {
+      try {
+        const response = await fetch(`${API_BASE}/auth/login`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ username, password })
+        });
+        
+        if (!response.ok) {
+          throw new Error('Authentication failed');
+        }
+        
+        return await response.json();
+      } catch (error) {
+        console.error('Authentication error:', error);
+        return null;
+      }
+    }
+    
+    async function verify2FA(username, code, recoveryCode) {
+      try {
+        const response = await fetch(`${API_BASE}/auth/2fa`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ 
+            username, 
+            code: code || undefined, 
+            recoveryCode: recoveryCode || undefined 
+          })
+        });
+        
+        if (!response.ok) {
+          throw new Error('2FA verification failed');
+        }
+        
+        return await response.json();
+      } catch (error) {
+        console.error('2FA verification error:', error);
+        return null;
+      }
+    }
 
     function onDomReady(){
       document.getElementById('loginForm').addEventListener('submit', onLoginSubmit);
@@ -37,37 +78,56 @@
       // File-based autofill
       initFileUpload();
       // Update API status
-      document.getElementById('apiStatus').textContent='Frontend Only Mode';
-      document.getElementById('apiStatus').className='status-badge warning';
+      checkAPIConnection();
     }
 
     let pendingUser = null;
     let rememberMe = false;
 
-    function onLoginSubmit(e){
+    async function onLoginSubmit(e){
       e.preventDefault(); clearError();
       const username=(document.getElementById('username').value||'').trim();
       const password=document.getElementById('password').value||'';
       rememberMe=document.getElementById('remember').checked;
       if(!username || !password){ showError('Enter username and password.'); return; }
       
-      // Check demo users
-      const user = demoUsers[username];
-      if(!user || user.password !== password){
-        showError('Invalid username or password.');
-        return;
-      }
+      // Show loading state
+      const submitBtn = document.querySelector('#loginForm button[type="submit"]');
+      const originalText = submitBtn.innerHTML;
+      submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Authenticating...';
+      submitBtn.disabled = true;
+      
+      try {
+        // Authenticate with real backend
+        const authResult = await authenticateUser(username, password);
+        
+        if (!authResult) {
+          showError('Invalid username or password.');
+          return;
+        }
 
-      // Simulate 2FA check (all demo users have 2FA enabled)
-      pendingUser = username;
-      document.getElementById('loginForm').style.display='none';
-      document.getElementById('twoFAStep').style.display='block';
-      document.getElementById('twoFAUser').textContent=username;
-      document.getElementById('recoveryCode').parentElement.style.display='none';
-      document.getElementById('twoFACode').focus();
+        // Check if 2FA is required
+        if (authResult.twoFARequired) {
+          pendingUser = username;
+          document.getElementById('loginForm').style.display='none';
+          document.getElementById('twoFAStep').style.display='block';
+          document.getElementById('twoFAUser').textContent=username;
+          document.getElementById('recoveryCode').parentElement.style.display='none';
+          document.getElementById('twoFACode').focus();
+        } else {
+          // No 2FA required, complete login
+          finalizeLogin(username, authResult.user);
+        }
+      } catch (error) {
+        showError('Authentication failed. Please try again.');
+      } finally {
+        // Restore button state
+        submitBtn.innerHTML = originalText;
+        submitBtn.disabled = false;
+      }
     }
 
-    function onTwoFASubmit(e){
+    async function onTwoFASubmit(e){
       e.preventDefault(); clearError();
       const username=pendingUser; 
       if(!username){ showError('Session expired. Try again.'); return; }
@@ -75,38 +135,53 @@
       const code=(document.getElementById('twoFACode').value||'').trim();
       const rec=(document.getElementById('recoveryCode').value||'').trim();
       
-      // Simple validation - accept any 6-digit code or recovery code for demo
-      let valid = false;
-      if(code && code.length === 6 && /^\d{6}$/.test(code)){
-        valid = true;
-      } else if(rec && rec.length === 9 && rec.includes('-')){
-        valid = true;
-      }
+      // Show loading state
+      const submitBtn = document.querySelector('#twoFAForm button[type="submit"]');
+      const originalText = submitBtn.innerHTML;
+      submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Verifying...';
+      submitBtn.disabled = true;
       
-      if(!valid){
-        showError('Invalid 2FA verification.');
-        return;
-      }
+      try {
+        // Verify 2FA with real backend
+        const verifyResult = await verify2FA(username, code, rec);
+        
+        if (!verifyResult) {
+          showError('Invalid 2FA verification.');
+          return;
+        }
 
-      // Complete login
-      const user = demoUsers[username];
-      finalizeLogin(username, user);
+        // Complete login
+        finalizeLogin(username, verifyResult.user);
+      } catch (error) {
+        showError('2FA verification failed. Please try again.');
+      } finally {
+        // Restore button state
+        submitBtn.innerHTML = originalText;
+        submitBtn.disabled = false;
+      }
     }
 
-    function finalizeLogin(username, user){
-      // Store user data in localStorage
+    function finalizeLogin(username, user, token = null){
+      // Store user data and authentication token
       localStorage.setItem('userRole', user.role);
       localStorage.setItem('username', username);
       localStorage.setItem('fullName', user.fullName);
+      if (token) {
+        localStorage.setItem('authToken', token);
+      }
       if(rememberMe){ localStorage.setItem('rememberMe', '1'); } else { localStorage.removeItem('rememberMe'); }
       
-      // Store login history
-      const key=`loginHistory_${username}`; 
-      const ua=navigator.userAgent; 
-      const now=new Date().toISOString();
-      const hist=JSON.parse(localStorage.getItem(key) || '[]'); 
-      hist.unshift({ timestamp: now, ipAddress: 'Demo', device: ua, status: 'Success', location: 'Demo' }); 
-      localStorage.setItem(key, JSON.stringify(hist.slice(0,50)));
+      // Store login history (will be sent to backend)
+      const loginHistory = {
+        timestamp: new Date().toISOString(),
+        ipAddress: getClientIP(),
+        device: navigator.userAgent,
+        status: 'Success',
+        location: await getClientLocation()
+      };
+      
+      // Send login history to backend
+      sendLoginHistory(username, loginHistory);
       
       // Redirect based on role
       const role = user.role.toLowerCase();
@@ -118,40 +193,68 @@
         window.location.href='employee-dashboard.html'; 
       }
     }
+    
+    function getClientIP() {
+      // In production, this would be determined by the backend
+      return 'Unknown';
+    }
+    
+    async function getClientLocation() {
+      // In production, this would use a geolocation service
+      return 'Unknown';
+    }
+    
+    async function sendLoginHistory(username, loginHistory) {
+      try {
+        await fetch(`${API_BASE}/auth/login-history`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+          },
+          body: JSON.stringify({ username, loginHistory })
+        });
+      } catch (error) {
+        console.error('Failed to send login history:', error);
+      }
+    }
 
     function initRoleSwitcher(){
+      // Remove demo role switcher - users must enter their own credentials
       const select = document.getElementById('roleSelect');
-      if(!select) return;
-      select.addEventListener('change', ()=>{
-        const v = select.value;
-        if(v==='employee'){ document.getElementById('username').value='aaron'; document.getElementById('password').value='password'; }
-        else if(v==='hr'){ document.getElementById('username').value='hr1'; document.getElementById('password').value='password'; }
-        else if(v==='admin'){ document.getElementById('username').value='admin'; document.getElementById('password').value='admin123'; }
-        else if(v==='crypto-trader'){ document.getElementById('username').value='crypto1'; document.getElementById('password').value='crypto123'; }
-        else { document.getElementById('username').value=''; document.getElementById('password').value=''; }
-      });
+      if(select) {
+        select.style.display = 'none';
+        const label = select.previousElementSibling;
+        if(label) label.style.display = 'none';
+      }
     }
 
     function initFileUpload(){
+      // Remove file upload feature for security
       const fileInput = document.getElementById('loginFile');
-      if(fileInput){
-        fileInput.addEventListener('change', async (e)=>{
-          const file = e.target.files?.[0];
-          if(!file) return;
-          try{
-            const txt = await file.text();
-            const obj = JSON.parse(txt);
-            const { username, password, role } = obj;
-            if(username) document.getElementById('username').value = username;
-            if(password) document.getElementById('password').value = password;
-            if(role){
-              const sel = document.getElementById('roleSelect');
-              if(sel){ sel.value = role; sel.dispatchEvent(new Event('change')); }
-            }
-          }catch(err){
-            alert('Invalid JSON file. Expected {"username":"","password":"","role":""}');
-          }
+      if(fileInput) {
+        fileInput.style.display = 'none';
+        const label = fileInput.previousElementSibling;
+        if(label) label.style.display = 'none';
+      }
+    }
+    
+    async function checkAPIConnection() {
+      try {
+        const response = await fetch(`${API_BASE}/health`, {
+          method: 'GET',
+          timeout: 5000
         });
+        
+        if (response.ok) {
+          document.getElementById('apiStatus').textContent = 'API: Online';
+          document.getElementById('apiStatus').className = 'status-badge success';
+        } else {
+          throw new Error('API not responding');
+        }
+      } catch (error) {
+        document.getElementById('apiStatus').textContent = 'API: Offline';
+        document.getElementById('apiStatus').className = 'status-badge danger';
       }
     }
 
@@ -164,26 +267,12 @@
       <div class="auth-header">
         <div class="brand"><i class="fas fa-chart-line"></i> Payroll Management</div>
         <h1>Sign in to your account</h1>
-        <div class="hint">Use role switcher below to autofill demo users. <span id="apiStatus" class="status-badge">Checking API...</span></div>
+        <div class="hint">Enter your credentials to access the system. <span id="apiStatus" class="status-badge">Checking API...</span></div>
       </div>
       <div id="errorBox" class="error"></div>
 
       <!-- Step 1: Credentials -->
       <form id="loginForm">
-        <div class="form-group">
-          <label for="loginFile">Load credentials file</label>
-          <input type="file" id="loginFile" accept="application/json">
-        </div>
-        <div class="form-group">
-          <label for="roleSelect">Quick role</label>
-          <select id="roleSelect">
-            <option value="">Choose…</option>
-        <option value="employee">Employee (aaron/password)</option>
-        <option value="hr">HR (hr1/password)</option>
-        <option value="admin">Admin (admin/admin123)</option>
-        <option value="crypto-trader">Crypto Trader (crypto1/crypto123)</option>
-          </select>
-        </div>
         <div class="form-group">
           <label for="username">Username</label>
           <input type="text" id="username" placeholder="e.g. aaron" autocomplete="username" required>
