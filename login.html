@@ -18,6 +18,11 @@
       'crypto1': { password: 'crypto123', role: 'crypto-trader', fullName: 'Crypto Trader' }
     };
 
+    // Check if user has 2FA enabled
+    function is2FAEnabled(username) {
+      return localStorage.getItem(`2fa_enabled_${username}`) === 'true';
+    }
+
     let pendingUser = null;
     let rememberMe = false;
 
@@ -95,12 +100,18 @@
 
       pendingUser = username;
       
-      // Show 2FA step
-      document.getElementById('loginForm').style.display = 'none';
-      document.getElementById('twoFAStep').style.display = 'block';
-      document.getElementById('twoFAUser').textContent = username;
-      document.getElementById('recoveryCode').parentElement.style.display = 'none';
-      document.getElementById('twoFACode').focus();
+      // Check if user has 2FA enabled
+      if (is2FAEnabled(username)) {
+        // Show 2FA step
+        document.getElementById('loginForm').style.display = 'none';
+        document.getElementById('twoFAStep').style.display = 'block';
+        document.getElementById('twoFAUser').textContent = username;
+        document.getElementById('recoveryCode').parentElement.style.display = 'none';
+        document.getElementById('twoFACode').focus();
+      } else {
+        // Skip 2FA and go directly to dashboard
+        finalizeLogin(username);
+      }
       
       submitBtn.classList.remove('btn-loading');
       submitBtn.disabled = false;
@@ -235,6 +246,12 @@
           <button type="submit" class="primary-btn" style="width:100%; justify-content:center;">
             <i class="fas fa-right-to-bracket"></i> Continue
           </button>
+        </div>
+        
+        <div style="text-align: center; margin-top: 16px;">
+          <a href="frontend/2fa-setup.html" style="color: var(--primary); text-decoration: none; font-size: 0.9rem;">
+            <i class="fas fa-shield-alt"></i> Setup Two-Factor Authentication
+          </a>
         </div>
       </form>
 

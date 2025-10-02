@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>2FA Setup - PayrollPro</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+  <script>
+    function logout(){ localStorage.removeItem('authToken'); localStorage.removeItem('userRole'); localStorage.getItem('username'); localStorage.removeItem('fullName'); window.location.href='../login.html'; }
+    function checkAuth(){ const t=localStorage.getItem('authToken'); const r=localStorage.getItem('userRole'); const u=localStorage.getItem('username'); if(!t||!r||!u){ window.location.href='../login.html'; return; } document.getElementById('currentUser').innerHTML=`<span>${localStorage.getItem('fullName') || u}</span><span class="role-badge">${r.toUpperCase()}</span>`; document.body.classList.add('employee-theme'); load2FAStatus(); }
+
+    // 2FA Setup System
+    let currentUser = localStorage.getItem('username');
+    let userRole = localStorage.getItem('userRole');
+    let twoFASecret = null;
+    let setupStep = 1;
+
+    function load2FAStatus() {
+      const twoFAEnabled = localStorage.getItem(`2fa_enabled_${currentUser}`) === 'true';
+      const twoFASecret = localStorage.getItem(`2fa_secret_${currentUser}`);
+      
+      if (twoFAEnabled && twoFASecret) {
+        show2FAManagement();
+      } else {
+        show2FASetup();
+      }
+    }
+
+    function show2FASetup() {
+      document.getElementById('setupSection').style.display = 'block';
+      document.getElementById('managementSection').style.display = 'none';
+      document.getElementById('step1').style.display = 'block';
+      document.getElementById('step2').style.display = 'none';
+      document.getElementById('step3').style.display = 'none';
+    }
+
+    function show2FAManagement() {
+      document.getElementById('setupSection').style.display = 'none';
+      document.getElementById('managementSection').style.display = 'block';
+      load2FAManagementData();
+    }
+
+    function generate2FASecret() {
+      // Generate a random 32-character base32 secret
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+      let secret = '';
+      for (let i = 0; i < 32; i++) {
+        secret += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      
+      twoFASecret = secret;
+      localStorage.setItem(`2fa_secret_${currentUser}`, secret);
+      
+      // Generate QR code
+      const issuer = 'PayrollPro';
+      const accountName = `${currentUser}@payrollpro.com`;
+      const qrData = `otpauth://totp/${encodeURIComponent(issuer)}:${encodeURIComponent(accountName)}?secret=${secret}&issuer=${encodeURIComponent(issuer)}`;
+      
+      const qrContainer = document.getElementById('qrCode');
+      qrContainer.innerHTML = '';
+      
+      QRCode.toCanvas(qrContainer, qrData, {
+        width: 200,
+        height: 200,
+        color: {
+          dark: '#000000',
+          light: '#FFFFFF'
+        }
+      }, function (error) {
+        if (error) {
+          console.error('QR Code generation error:', error);
+          qrContainer.innerHTML = '<div class="error">Failed to generate QR code</div>';
+        }
+      });
+      
+      // Display manual key
+      document.getElementById('manualKey').textContent = secret;
+      document.getElementById('accountName').textContent = accountName;
+      document.getElementById('issuer').textContent = issuer;
+      
+      // Show step 2
+      document.getElementById('step1').style.display = 'none';
+      document.getElementById('step2').style.display = 'block';
+      setupStep = 2;
+    }
+
+    function verify2FACode() {
+      const code = document.getElementById('verificationCode').value.trim();
+      
+      if (!code || code.length !== 6) {
+        showError('Please enter a valid 6-digit code');
+        return;
+      }
+      
+      // Simulate verification (in real app, this would verify against the secret)
+      const isValid = verifyTOTPCode(twoFASecret, code);
+      
+      if (isValid) {
+        // Enable 2FA for user
+        localStorage.setItem(`2fa_enabled_${currentUser}`, 'true');
+        localStorage.setItem(`2fa_setup_date_${currentUser}`, new Date().toISOString());
+        
+        // Generate backup codes
+        generateBackupCodes();
+        
+        // Show success step
+        document.getElementById('step2').style.display = 'none';
+        document.getElementById('step3').style.display = 'block';
+        setupStep = 3;
+      } else {
+        showError('Invalid verification code. Please try again.');
+      }
+    }
+
+    function verifyTOTPCode(secret, code) {
+      // Simplified TOTP verification (in production, use proper TOTP library)
+      const now = Math.floor(Date.now() / 1000 / 30);
+      const expectedCode = generateTOTPCode(secret, now);
+      return code === expectedCode;
+    }
+
+    function generateTOTPCode(secret, time) {
+      // Simplified TOTP generation (in production, use proper TOTP library)
+      const timeStr = time.toString(16).padStart(16, '0');
+      const hash = simpleHash(secret + timeStr);
+      const code = (parseInt(hash, 16) % 1000000).toString().padStart(6, '0');
+      return code;
+    }
+
+    function simpleHash(str) {
+      let hash = 0;
+      for (let i = 0; i < str.length; i++) {
+        const char = str.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash; // Convert to 32-bit integer
+      }
+      return Math.abs(hash).toString(16);
+    }
+
+    function generateBackupCodes() {
+      const codes = [];
+      for (let i = 0; i < 10; i++) {
+        codes.push(Math.random().toString(36).substring(2, 8).toUpperCase());
+      }
+      localStorage.setItem(`2fa_backup_codes_${currentUser}`, JSON.stringify(codes));
+      displayBackupCodes(codes);
+    }
+
+    function displayBackupCodes(codes) {
+      const container = document.getElementById('backupCodes');
+      container.innerHTML = codes.map((code, index) => `
+        <div class="backup-code-item">
+          <span class="code-number">${index + 1}.</span>
+          <span class="backup-code">${code}</span>
+          <button onclick="copyBackupCode('${code}')" class="copy-btn">
+            <i class="fas fa-copy"></i>
+          </button>
+        </div>
+      `).join('');
+    }
+
+    function copyBackupCode(code) {
+      navigator.clipboard.writeText(code).then(() => {
+        showSuccess('Backup code copied to clipboard!');
+      }).catch(() => {
+        showError('Failed to copy backup code');
+      });
+    }
+
+    function downloadBackupCodes() {
+      const codes = JSON.parse(localStorage.getItem(`2fa_backup_codes_${currentUser}`) || '[]');
+      const content = `PayrollPro 2FA Backup Codes for ${currentUser}\n\n` +
+                     `Generated: ${new Date().toLocaleString()}\n\n` +
+                     codes.map((code, index) => `${index + 1}. ${code}`).join('\n') +
+                     `\n\nImportant: Store these codes in a safe place. Each code can only be used once.`;
+      
+      const blob = new Blob([content], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `payrollpro-2fa-backup-codes-${currentUser}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    function complete2FASetup() {
+      showSuccess('2FA setup completed successfully!');
+      setTimeout(() => {
+        load2FAStatus();
+      }, 2000);
+    }
+
+    function load2FAManagementData() {
+      const setupDate = localStorage.getItem(`2fa_setup_date_${currentUser}`);
+      const backupCodes = JSON.parse(localStorage.getItem(`2fa_backup_codes_${currentUser}`) || '[]');
+      
+      document.getElementById('setupDate').textContent = new Date(setupDate).toLocaleString();
+      document.getElementById('remainingBackupCodes').textContent = backupCodes.length;
+      
+      if (backupCodes.length > 0) {
+        document.getElementById('backupCodesManagement').innerHTML = backupCodes.map((code, index) => `
+          <div class="backup-code-item">
+            <span class="code-number">${index + 1}.</span>
+            <span class="backup-code">${code}</span>
+            <span class="code-status">Available</span>
+          </div>
+        `).join('');
+      } else {
+        document.getElementById('backupCodesManagement').innerHTML = '<div class="no-codes">No backup codes remaining</div>';
+      }
+    }
+
+    function disable2FA() {
+      if (confirm('Are you sure you want to disable 2FA? This will make your account less secure.')) {
+        localStorage.removeItem(`2fa_enabled_${currentUser}`);
+        localStorage.removeItem(`2fa_secret_${currentUser}`);
+        localStorage.removeItem(`2fa_setup_date_${currentUser}`);
+        localStorage.removeItem(`2fa_backup_codes_${currentUser}`);
+        
+        showSuccess('2FA has been disabled successfully!');
+        setTimeout(() => {
+          load2FAStatus();
+        }, 2000);
+      }
+    }
+
+    function regenerateBackupCodes() {
+      if (confirm('This will invalidate all existing backup codes. Are you sure?')) {
+        generateBackupCodes();
+        load2FAManagementData();
+        showSuccess('New backup codes generated!');
+      }
+    }
+
+    function showError(message) {
+      const errorDiv = document.getElementById('errorMessage');
+      errorDiv.textContent = message;
+      errorDiv.style.display = 'block';
+      setTimeout(() => {
+        errorDiv.style.display = 'none';
+      }, 5000);
+    }
+
+    function showSuccess(message) {
+      const successDiv = document.getElementById('successMessage');
+      successDiv.textContent = message;
+      successDiv.style.display = 'block';
+      setTimeout(() => {
+        successDiv.style.display = 'none';
+      }, 5000);
+    }
+
+    function goBack() {
+      if (setupStep === 2) {
+        document.getElementById('step2').style.display = 'none';
+        document.getElementById('step1').style.display = 'block';
+        setupStep = 1;
+      } else if (setupStep === 3) {
+        document.getElementById('step3').style.display = 'none';
+        document.getElementById('step2').style.display = 'block';
+        setupStep = 2;
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', checkAuth);
+  </script>
+  <style>
+    .setup-container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    .setup-step {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      margin-bottom: 20px;
+      box-shadow: var(--shadow);
+    }
+    .step-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .step-number {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: var(--primary);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 0.9rem;
+    }
+    .step-title {
+      font-size: 1.2rem;
+      font-weight: 600;
+      margin: 0;
+    }
+    .qr-container {
+      text-align: center;
+      margin: 20px 0;
+    }
+    .qr-code {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      background: white;
+      display: inline-block;
+    }
+    .manual-setup {
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      margin: 16px 0;
+    }
+    .manual-setup h4 {
+      margin: 0 0 12px 0;
+      color: var(--text);
+    }
+    .key-display {
+      font-family: 'Courier New', monospace;
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 8px 12px;
+      font-size: 0.9rem;
+      word-break: break-all;
+      margin: 8px 0;
+    }
+    .verification-input {
+      text-align: center;
+      margin: 20px 0;
+    }
+    .verification-input input {
+      font-size: 1.5rem;
+      text-align: center;
+      letter-spacing: 0.5rem;
+      width: 200px;
+      padding: 12px;
+      border: 2px solid var(--border);
+      border-radius: 8px;
+    }
+    .verification-input input:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+    .backup-codes {
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      margin: 16px 0;
+    }
+    .backup-code-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 0;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    .backup-code-item:last-child {
+      border-bottom: none;
+    }
+    .code-number {
+      font-weight: 600;
+      color: var(--muted);
+      min-width: 24px;
+    }
+    .backup-code {
+      font-family: 'Courier New', monospace;
+      font-weight: 600;
+      color: var(--text);
+      flex: 1;
+    }
+    .copy-btn {
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: 4px;
+      padding: 4px 8px;
+      cursor: pointer;
+      font-size: 0.8rem;
+    }
+    .copy-btn:hover {
+      background: var(--primary-600);
+    }
+    .code-status {
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .management-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .stat-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      text-align: center;
+    }
+    .stat-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: var(--primary);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 8px;
+    }
+    .stat-value {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .stat-label {
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    .action-buttons {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      margin-top: 20px;
+    }
+    .error, .success {
+      padding: 12px;
+      border-radius: 8px;
+      margin: 16px 0;
+      display: none;
+    }
+    .error {
+      background: #fee2e2;
+      color: #dc2626;
+      border: 1px solid #fecaca;
+    }
+    .success {
+      background: #dcfce7;
+      color: #166534;
+      border: 1px solid #bbf7d0;
+    }
+    .no-codes {
+      text-align: center;
+      color: var(--muted);
+      font-style: italic;
+      padding: 20px;
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="header-content">
+      <h1><i class="fas fa-shield-alt"></i> Two-Factor Authentication Setup</h1>
+      <div class="user-info">
+        <span id="currentUser">Loading...</span>
+        <button onclick="logout()" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</button>
+      </div>
+    </div>
+  </header>
+  
+  <div class="container">
+    <nav class="sidebar">
+      <div class="sidebar-header"><i class="fas fa-user-tie"></i><span>Security</span></div>
+      <ul class="nav-links">
+        <li><a href="employee-dashboard.html"><i class="fas fa-gauge"></i><span>Dashboard</span></a></li>
+        <li><a href="employee-profile.html"><i class="fas fa-user-cog"></i><span>Profile</span></a></li>
+        <li class="active"><a href="2fa-setup.html"><i class="fas fa-shield-alt"></i><span>2FA Setup</span></a></li>
+        <li><a href="leave-management.html"><i class="fas fa-calendar-alt"></i><span>Leave & Attendance</span></a></li>
+        <li><a href="crypto-payroll.html"><i class="fas fa-coins"></i><span>Crypto Payroll</span></a></li>
+      </ul>
+    </nav>
+    
+    <main class="main-content">
+      <div class="setup-container">
+        <div class="page-header">
+          <h2><i class="fas fa-shield-alt"></i> Two-Factor Authentication</h2>
+          <p>Secure your account with two-factor authentication</p>
+        </div>
+
+        <div id="errorMessage" class="error"></div>
+        <div id="successMessage" class="success"></div>
+
+        <!-- 2FA Setup Section -->
+        <div id="setupSection">
+          <!-- Step 1: Introduction -->
+          <div id="step1" class="setup-step">
+            <div class="step-header">
+              <div class="step-number">1</div>
+              <h3 class="step-title">Enable Two-Factor Authentication</h3>
+            </div>
+            <div class="step-content">
+              <p>Two-factor authentication (2FA) adds an extra layer of security to your account. You'll need an authenticator app like Google Authenticator, Authy, or Microsoft Authenticator.</p>
+              
+              <div class="authenticator-apps">
+                <h4>Recommended Authenticator Apps:</h4>
+                <div class="app-list">
+                  <div class="app-item">
+                    <i class="fab fa-google"></i>
+                    <span>Google Authenticator</span>
+                  </div>
+                  <div class="app-item">
+                    <i class="fas fa-mobile-alt"></i>
+                    <span>Authy</span>
+                  </div>
+                  <div class="app-item">
+                    <i class="fab fa-microsoft"></i>
+                    <span>Microsoft Authenticator</span>
+                  </div>
+                </div>
+              </div>
+              
+              <div class="action-buttons">
+                <button onclick="generate2FASecret()" class="primary-btn">
+                  <i class="fas fa-qrcode"></i> Generate QR Code
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Step 2: QR Code and Manual Setup -->
+          <div id="step2" class="setup-step">
+            <div class="step-header">
+              <div class="step-number">2</div>
+              <h3 class="step-title">Scan QR Code or Enter Key Manually</h3>
+            </div>
+            <div class="step-content">
+              <div class="qr-container">
+                <h4>Scan this QR code with your authenticator app:</h4>
+                <div class="qr-code">
+                  <canvas id="qrCode"></canvas>
+                </div>
+              </div>
+              
+              <div class="manual-setup">
+                <h4>Or enter this key manually:</h4>
+                <p><strong>Account:</strong> <span id="accountName"></span></p>
+                <p><strong>Issuer:</strong> <span id="issuer"></span></p>
+                <p><strong>Secret Key:</strong></p>
+                <div class="key-display" id="manualKey"></div>
+              </div>
+              
+              <div class="verification-input">
+                <h4>Enter the 6-digit code from your authenticator app:</h4>
+                <input type="text" id="verificationCode" maxlength="6" placeholder="000000" pattern="[0-9]{6}">
+              </div>
+              
+              <div class="action-buttons">
+                <button onclick="goBack()" class="secondary-btn">
+                  <i class="fas fa-arrow-left"></i> Back
+                </button>
+                <button onclick="verify2FACode()" class="primary-btn">
+                  <i class="fas fa-check"></i> Verify & Continue
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Step 3: Backup Codes -->
+          <div id="step3" class="setup-step">
+            <div class="step-header">
+              <div class="step-number">3</div>
+              <h3 class="step-title">Save Your Backup Codes</h3>
+            </div>
+            <div class="step-content">
+              <p><strong>Important:</strong> Save these backup codes in a safe place. Each code can only be used once to access your account if you lose your authenticator device.</p>
+              
+              <div class="backup-codes">
+                <div class="backup-codes-header">
+                  <h4>Your Backup Codes:</h4>
+                  <button onclick="downloadBackupCodes()" class="secondary-btn small">
+                    <i class="fas fa-download"></i> Download
+                  </button>
+                </div>
+                <div id="backupCodes"></div>
+              </div>
+              
+              <div class="action-buttons">
+                <button onclick="goBack()" class="secondary-btn">
+                  <i class="fas fa-arrow-left"></i> Back
+                </button>
+                <button onclick="complete2FASetup()" class="primary-btn">
+                  <i class="fas fa-check"></i> Complete Setup
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2FA Management Section -->
+        <div id="managementSection">
+          <div class="setup-step">
+            <div class="step-header">
+              <i class="fas fa-shield-alt" style="color: #16a34a;"></i>
+              <h3 class="step-title">Two-Factor Authentication is Enabled</h3>
+            </div>
+            
+            <div class="management-stats">
+              <div class="stat-card">
+                <div class="stat-icon">
+                  <i class="fas fa-calendar-check"></i>
+                </div>
+                <div class="stat-value">Active</div>
+                <div class="stat-label">2FA Status</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-icon">
+                  <i class="fas fa-calendar"></i>
+                </div>
+                <div class="stat-value" id="setupDate">-</div>
+                <div class="stat-label">Setup Date</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-icon">
+                  <i class="fas fa-key"></i>
+                </div>
+                <div class="stat-value" id="remainingBackupCodes">-</div>
+                <div class="stat-label">Backup Codes</div>
+              </div>
+            </div>
+            
+            <div class="backup-codes">
+              <div class="backup-codes-header">
+                <h4>Remaining Backup Codes:</h4>
+                <button onclick="regenerateBackupCodes()" class="secondary-btn small">
+                  <i class="fas fa-refresh"></i> Regenerate
+                </button>
+              </div>
+              <div id="backupCodesManagement"></div>
+            </div>
+            
+            <div class="action-buttons">
+              <button onclick="downloadBackupCodes()" class="secondary-btn">
+                <i class="fas fa-download"></i> Download Backup Codes
+              </button>
+              <button onclick="disable2FA()" class="danger">
+                <i class="fas fa-times"></i> Disable 2FA
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <footer><p>&copy; 2025 PayrollPro by Aaron | Two-Factor Authentication</p></footer>
+</body>
+</html>
