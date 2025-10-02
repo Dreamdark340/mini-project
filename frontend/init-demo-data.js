@@ -158,11 +158,44 @@ function initializeDemoData() {
     
     localStorage.setItem('employeeData', JSON.stringify(employeeData));
     
+    // Initialize sample attendance correction requests
+    const sampleCorrectionRequests = [
+        {
+            id: 'corr_001',
+            username: 'aaron',
+            fullName: 'Aaron Johnson',
+            date: '2025-01-08',
+            currentStatus: 'absent',
+            requestedStatus: 'present',
+            requestedTime: '09:15',
+            reason: 'I was present but forgot to mark attendance. I have witness from my colleague.',
+            status: 'pending',
+            requestedAt: '2025-01-09T10:30:00Z'
+        },
+        {
+            id: 'corr_002',
+            username: 'crypto1',
+            fullName: 'Crypto Trader',
+            date: '2025-01-10',
+            currentStatus: 'late',
+            requestedStatus: 'present',
+            requestedTime: '08:45',
+            reason: 'I arrived on time but the system marked me as late due to technical issue.',
+            status: 'approved',
+            requestedAt: '2025-01-10T14:20:00Z',
+            reviewedAt: '2025-01-10T16:00:00Z',
+            reviewedBy: 'hr1'
+        }
+    ];
+    
+    localStorage.setItem('correctionRequests', JSON.stringify(sampleCorrectionRequests));
+    
     console.log('Demo data initialized successfully!');
     console.log('- Leave balances set for all demo users');
     console.log('- Sample leave requests created');
     console.log('- 30 days of attendance data generated');
     console.log('- Employee data initialized');
+    console.log('- Sample attendance correction requests created');
 }
 
 // Auto-initialize when script loads

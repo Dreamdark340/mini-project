@@ -24,6 +24,7 @@
 
     let leaveData = JSON.parse(localStorage.getItem('leaveData') || '[]');
     let attendanceData = JSON.parse(localStorage.getItem('attendanceData') || '[]');
+    let correctionRequests = JSON.parse(localStorage.getItem('correctionRequests') || '[]');
 
     function loadLeaveData() {
       const username = localStorage.getItem('username');
@@ -134,6 +135,9 @@
       
       // Load attendance history
       loadAttendanceHistory(username, userRole);
+      
+      // Load correction requests
+      loadCorrectionRequests(username, userRole);
     }
 
     function loadAttendanceSummary(username) {
@@ -333,6 +337,182 @@
       alert(existingRecord ? 'Check out marked successfully!' : 'Check in marked successfully!');
     }
 
+    function loadCorrectionRequests(username, userRole) {
+      const requests = correctionRequests.filter(req => 
+        userRole === 'hr' || userRole === 'admin' || req.username === username
+      );
+
+      const container = document.getElementById('correctionRequests');
+      if (requests.length === 0) {
+        container.innerHTML = '<div class="no-data">No attendance correction requests found</div>';
+        return;
+      }
+
+      container.innerHTML = requests.map(request => {
+        const statusClass = request.status === 'approved' ? 'success' : 
+                           request.status === 'rejected' ? 'danger' : 'warning';
+        const canApprove = (userRole === 'hr' || userRole === 'admin') && request.status === 'pending';
+        
+        return `
+          <div class="correction-request-card">
+            <div class="request-header">
+              <div class="request-info">
+                <h4>${request.fullName || request.username}</h4>
+                <span class="request-date">${new Date(request.date).toLocaleDateString()}</span>
+              </div>
+              <div class="request-status">
+                <span class="status-badge ${statusClass}">${request.status.toUpperCase()}</span>
+                ${canApprove ? `
+                  <div class="approval-buttons">
+                    <button onclick="approveCorrection('${request.id}')" class="secondary-btn small success">
+                      <i class="fas fa-check"></i> Approve
+                    </button>
+                    <button onclick="rejectCorrection('${request.id}')" class="secondary-btn small danger">
+                      <i class="fas fa-times"></i> Reject
+                    </button>
+                  </div>
+                ` : ''}
+              </div>
+            </div>
+            <div class="correction-details">
+              <div class="detail-row">
+                <div class="detail-item">
+                  <i class="fas fa-calendar"></i>
+                  <span><strong>Date:</strong> ${new Date(request.date).toLocaleDateString()}</span>
+                </div>
+                <div class="detail-item">
+                  <i class="fas fa-exclamation-triangle"></i>
+                  <span><strong>Current Status:</strong> ${request.currentStatus}</span>
+                </div>
+              </div>
+              <div class="detail-row">
+                <div class="detail-item">
+                  <i class="fas fa-arrow-right"></i>
+                  <span><strong>Requested Status:</strong> ${request.requestedStatus}</span>
+                </div>
+                <div class="detail-item">
+                  <i class="fas fa-clock"></i>
+                  <span><strong>Requested Time:</strong> ${request.requestedTime || 'N/A'}</span>
+                </div>
+              </div>
+              <div class="detail-row">
+                <div class="detail-item full-width">
+                  <i class="fas fa-comment"></i>
+                  <span><strong>Reason:</strong> ${request.reason}</span>
+                </div>
+              </div>
+              <div class="detail-row">
+                <div class="detail-item">
+                  <i class="fas fa-calendar-plus"></i>
+                  <span><strong>Requested:</strong> ${new Date(request.requestedAt).toLocaleDateString()}</span>
+                </div>
+                ${request.reviewedAt ? `
+                  <div class="detail-item">
+                    <i class="fas fa-user-check"></i>
+                    <span><strong>Reviewed by:</strong> ${request.reviewedBy}</span>
+                  </div>
+                ` : ''}
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function openCorrectionModal() {
+      document.getElementById('correctionModal').style.display = 'block';
+    }
+
+    function closeCorrectionModal() {
+      document.getElementById('correctionModal').style.display = 'none';
+      document.getElementById('correctionForm').reset();
+    }
+
+    function submitCorrectionRequest(e) {
+      e.preventDefault();
+      const form = e.target;
+      const formData = new FormData(form);
+      
+      const request = {
+        id: 'corr_' + Date.now(),
+        username: localStorage.getItem('username'),
+        fullName: localStorage.getItem('fullName') || localStorage.getItem('username'),
+        date: formData.get('date'),
+        currentStatus: formData.get('currentStatus'),
+        requestedStatus: formData.get('requestedStatus'),
+        requestedTime: formData.get('requestedTime'),
+        reason: formData.get('reason'),
+        status: 'pending',
+        requestedAt: new Date().toISOString()
+      };
+
+      correctionRequests.push(request);
+      localStorage.setItem('correctionRequests', JSON.stringify(correctionRequests));
+      
+      closeCorrectionModal();
+      loadAttendanceData();
+      
+      alert('Attendance correction request submitted successfully!');
+    }
+
+    function approveCorrection(requestId) {
+      const request = correctionRequests.find(req => req.id === requestId);
+      if (request) {
+        request.status = 'approved';
+        request.reviewedAt = new Date().toISOString();
+        request.reviewedBy = localStorage.getItem('username');
+        
+        // Update the actual attendance record
+        const attendanceRecord = attendanceData.find(att => 
+          att.username === request.username && att.date === request.date
+        );
+        
+        if (attendanceRecord) {
+          attendanceRecord.status = request.requestedStatus;
+          if (request.requestedTime) {
+            if (request.requestedStatus === 'present' || request.requestedStatus === 'late') {
+              attendanceRecord.checkIn = request.requestedTime;
+            }
+          }
+          localStorage.setItem('attendanceData', JSON.stringify(attendanceData));
+        }
+        
+        localStorage.setItem('correctionRequests', JSON.stringify(correctionRequests));
+        loadAttendanceData();
+        alert('Attendance correction approved and updated!');
+      }
+    }
+
+    function rejectCorrection(requestId) {
+      const request = correctionRequests.find(req => req.id === requestId);
+      if (request) {
+        request.status = 'rejected';
+        request.reviewedAt = new Date().toISOString();
+        request.reviewedBy = localStorage.getItem('username');
+        
+        localStorage.setItem('correctionRequests', JSON.stringify(correctionRequests));
+        loadAttendanceData();
+        alert('Attendance correction request rejected!');
+      }
+    }
+
+    function loadAttendanceForDate(date) {
+      const username = localStorage.getItem('username');
+      const attendanceRecord = attendanceData.find(att => 
+        att.username === username && att.date === date
+      );
+      
+      if (attendanceRecord) {
+        document.getElementById('currentStatus').value = attendanceRecord.status;
+        document.getElementById('currentStatus').disabled = true;
+        document.getElementById('currentStatusLabel').textContent = 'Current Status (Read-only)';
+      } else {
+        document.getElementById('currentStatus').value = 'absent';
+        document.getElementById('currentStatus').disabled = true;
+        document.getElementById('currentStatusLabel').textContent = 'Current Status (No record found - marked as absent)';
+      }
+    }
+
     document.addEventListener('DOMContentLoaded', checkAuth);
   </script>
   <style>
@@ -474,6 +654,50 @@
       font-size: 0.7rem;
       color: var(--muted);
     }
+    .correction-request-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 12px;
+      box-shadow: var(--shadow);
+      border-left: 4px solid #f59e0b;
+    }
+    .correction-details {
+      margin-top: 12px;
+    }
+    .detail-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 8px;
+    }
+    .detail-row .detail-item.full-width {
+      grid-column: 1 / -1;
+    }
+    .detail-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+    .detail-item i {
+      width: 16px;
+      color: var(--primary);
+    }
+    .request-date {
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    .approval-buttons {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .form-group.full-width {
+      grid-column: 1 / -1;
+    }
   </style>
 </head>
 <body>
@@ -538,6 +762,17 @@
         </div>
         <div id="attendanceHistory"></div>
       </div>
+
+      <!-- Attendance Correction Requests -->
+      <div class="content-section">
+        <div class="section-header">
+          <h3><i class="fas fa-edit"></i> Attendance Correction Requests</h3>
+          <button onclick="openCorrectionModal()" class="primary-btn">
+            <i class="fas fa-plus"></i> Request Correction
+          </button>
+        </div>
+        <div id="correctionRequests"></div>
+      </div>
     </main>
   </div>
 
@@ -577,6 +812,53 @@
         </div>
         <div class="modal-actions">
           <button type="button" class="secondary-btn" onclick="closeLeaveRequestModal()">Cancel</button>
+          <button type="submit" class="primary-btn"><i class="fas fa-paper-plane"></i> Submit Request</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Attendance Correction Modal -->
+  <div id="correctionModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3><i class="fas fa-edit"></i> Request Attendance Correction</h3>
+        <span class="close" onclick="closeCorrectionModal()">&times;</span>
+      </div>
+      <form id="correctionForm" onsubmit="submitCorrectionRequest(event)">
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Date to Correct</label>
+            <input type="date" name="date" required onchange="loadAttendanceForDate(this.value)">
+          </div>
+          <div class="form-group">
+            <label id="currentStatusLabel">Current Status</label>
+            <select name="currentStatus" id="currentStatus" required>
+              <option value="present">Present</option>
+              <option value="absent">Absent</option>
+              <option value="late">Late</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Requested Status</label>
+            <select name="requestedStatus" required>
+              <option value="">Select correct status...</option>
+              <option value="present">Present</option>
+              <option value="absent">Absent</option>
+              <option value="late">Late</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Correct Time (if applicable)</label>
+            <input type="time" name="requestedTime" placeholder="HH:MM">
+          </div>
+          <div class="form-group full-width">
+            <label>Reason for Correction</label>
+            <textarea name="reason" rows="3" placeholder="Please explain why this correction is needed..." required></textarea>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="secondary-btn" onclick="closeCorrectionModal()">Cancel</button>
           <button type="submit" class="primary-btn"><i class="fas fa-paper-plane"></i> Submit Request</button>
         </div>
       </form>

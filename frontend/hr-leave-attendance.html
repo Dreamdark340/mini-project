@@ -25,6 +25,7 @@
     let leaveData = JSON.parse(localStorage.getItem('leaveData') || '[]');
     let attendanceData = JSON.parse(localStorage.getItem('attendanceData') || '[]');
     let employeeData = JSON.parse(localStorage.getItem('employeeData') || '[]');
+    let correctionRequests = JSON.parse(localStorage.getItem('correctionRequests') || '[]');
 
     function loadHRData() {
       loadPendingLeaveRequests();
@@ -32,6 +33,7 @@
       loadAttendanceOverview();
       loadEmployeeAttendance();
       loadSalaryIntegration();
+      loadCorrectionRequests();
     }
 
     function loadPendingLeaveRequests() {
@@ -447,6 +449,181 @@
       }
     }
 
+    function loadCorrectionRequests() {
+      const pendingCorrections = correctionRequests.filter(req => req.status === 'pending');
+      const allCorrections = correctionRequests;
+      
+      // Load pending corrections
+      const pendingContainer = document.getElementById('pendingCorrections');
+      if (pendingCorrections.length === 0) {
+        pendingContainer.innerHTML = '<div class="no-data">No pending attendance correction requests</div>';
+      } else {
+        pendingContainer.innerHTML = pendingCorrections.map(request => `
+          <div class="correction-request-card">
+            <div class="request-header">
+              <div class="employee-info">
+                <h4>${request.fullName || request.username}</h4>
+                <span class="employee-id">ID: ${request.username}</span>
+              </div>
+              <div class="request-meta">
+                <span class="date-badge">${new Date(request.date).toLocaleDateString()}</span>
+                <span class="status-change-badge">
+                  ${request.currentStatus} → ${request.requestedStatus}
+                </span>
+              </div>
+            </div>
+            
+            <div class="correction-details">
+              <div class="detail-row">
+                <div class="detail-item">
+                  <i class="fas fa-calendar"></i>
+                  <span><strong>Date:</strong> ${new Date(request.date).toLocaleDateString()}</span>
+                </div>
+                <div class="detail-item">
+                  <i class="fas fa-exclamation-triangle"></i>
+                  <span><strong>Current:</strong> ${request.currentStatus}</span>
+                </div>
+              </div>
+              <div class="detail-row">
+                <div class="detail-item">
+                  <i class="fas fa-arrow-right"></i>
+                  <span><strong>Requested:</strong> ${request.requestedStatus}</span>
+                </div>
+                <div class="detail-item">
+                  <i class="fas fa-clock"></i>
+                  <span><strong>Time:</strong> ${request.requestedTime || 'N/A'}</span>
+                </div>
+              </div>
+              <div class="detail-row">
+                <div class="detail-item full-width">
+                  <i class="fas fa-comment"></i>
+                  <span><strong>Reason:</strong> ${request.reason}</span>
+                </div>
+              </div>
+              <div class="detail-row">
+                <div class="detail-item">
+                  <i class="fas fa-calendar-plus"></i>
+                  <span><strong>Requested:</strong> ${new Date(request.requestedAt).toLocaleDateString()}</span>
+                </div>
+              </div>
+            </div>
+            
+            <div class="request-actions">
+              <button onclick="approveCorrection('${request.id}')" class="primary-btn success">
+                <i class="fas fa-check"></i> Approve
+              </button>
+              <button onclick="rejectCorrection('${request.id}')" class="secondary-btn danger">
+                <i class="fas fa-times"></i> Reject
+              </button>
+              <button onclick="viewEmployeeAttendance('${request.username}')" class="secondary-btn">
+                <i class="fas fa-eye"></i> View History
+              </button>
+            </div>
+          </div>
+        `).join('');
+      }
+      
+      // Load all corrections
+      const allContainer = document.getElementById('allCorrections');
+      if (allCorrections.length === 0) {
+        allContainer.innerHTML = '<div class="no-data">No attendance correction requests found</div>';
+      } else {
+        // Group by status
+        const grouped = allCorrections.reduce((acc, req) => {
+          if (!acc[req.status]) acc[req.status] = [];
+          acc[req.status].push(req);
+          return acc;
+        }, {});
+
+        allContainer.innerHTML = Object.entries(grouped).map(([status, requests]) => {
+          const statusClass = status === 'approved' ? 'success' : 
+                             status === 'rejected' ? 'danger' : 'warning';
+          const statusIcon = status === 'approved' ? 'check-circle' : 
+                            status === 'rejected' ? 'times-circle' : 'clock';
+          
+          return `
+            <div class="status-group">
+              <h4 class="status-header ${statusClass}">
+                <i class="fas fa-${statusIcon}"></i>
+                ${status.toUpperCase()} (${requests.length})
+              </h4>
+              <div class="corrections-list">
+                ${requests.map(request => `
+                  <div class="correction-item">
+                    <div class="correction-info">
+                      <span class="employee-name">${request.fullName || request.username}</span>
+                      <span class="date">${new Date(request.date).toLocaleDateString()}</span>
+                      <span class="status-change">${request.currentStatus} → ${request.requestedStatus}</span>
+                      <span class="reason">${request.reason}</span>
+                    </div>
+                    <div class="correction-status">
+                      ${request.reviewedAt ? `
+                        <span class="reviewed-by">Reviewed by: ${request.reviewedBy}</span>
+                        <span class="reviewed-date">${new Date(request.reviewedAt).toLocaleDateString()}</span>
+                      ` : ''}
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+    }
+
+    function approveCorrection(requestId) {
+      const request = correctionRequests.find(req => req.id === requestId);
+      if (request) {
+        request.status = 'approved';
+        request.reviewedAt = new Date().toISOString();
+        request.reviewedBy = localStorage.getItem('username');
+        
+        // Update the actual attendance record
+        const attendanceRecord = attendanceData.find(att => 
+          att.username === request.username && att.date === request.date
+        );
+        
+        if (attendanceRecord) {
+          attendanceRecord.status = request.requestedStatus;
+          if (request.requestedTime) {
+            if (request.requestedStatus === 'present' || request.requestedStatus === 'late') {
+              attendanceRecord.checkIn = request.requestedTime;
+            }
+          }
+          localStorage.setItem('attendanceData', JSON.stringify(attendanceData));
+        } else {
+          // Create new attendance record if it doesn't exist
+          attendanceData.push({
+            id: `att_${request.username}_${request.date}`,
+            username: request.username,
+            fullName: request.fullName,
+            date: request.date,
+            checkIn: request.requestedTime || '09:00',
+            checkOut: request.requestedStatus === 'present' ? '17:30' : null,
+            status: request.requestedStatus
+          });
+          localStorage.setItem('attendanceData', JSON.stringify(attendanceData));
+        }
+        
+        localStorage.setItem('correctionRequests', JSON.stringify(correctionRequests));
+        loadHRData();
+        alert('Attendance correction approved and updated!');
+      }
+    }
+
+    function rejectCorrection(requestId) {
+      const request = correctionRequests.find(req => req.id === requestId);
+      if (request) {
+        request.status = 'rejected';
+        request.reviewedAt = new Date().toISOString();
+        request.reviewedBy = localStorage.getItem('username');
+        
+        localStorage.setItem('correctionRequests', JSON.stringify(correctionRequests));
+        loadHRData();
+        alert('Attendance correction request rejected!');
+      }
+    }
+
     document.addEventListener('DOMContentLoaded', checkAuth);
   </script>
   <style>
@@ -736,6 +913,102 @@
       gap: 8px;
       justify-content: flex-end;
     }
+    .correction-request-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 16px;
+      box-shadow: var(--shadow);
+      border-left: 4px solid #f59e0b;
+    }
+    .date-badge {
+      background: #e5e7eb;
+      color: var(--text);
+      padding: 4px 8px;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .status-change-badge {
+      background: #fef3c7;
+      color: #d97706;
+      padding: 4px 8px;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .correction-details {
+      margin: 16px 0;
+    }
+    .detail-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 8px;
+    }
+    .detail-row .detail-item.full-width {
+      grid-column: 1 / -1;
+    }
+    .detail-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+    .detail-item i {
+      width: 16px;
+      color: var(--primary);
+    }
+    .corrections-list {
+      display: grid;
+      gap: 8px;
+    }
+    .correction-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    .correction-info {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+    }
+    .employee-name {
+      font-weight: 600;
+      min-width: 120px;
+    }
+    .date {
+      color: var(--muted);
+      min-width: 100px;
+    }
+    .status-change {
+      color: var(--primary);
+      font-weight: 600;
+      min-width: 120px;
+    }
+    .reason {
+      color: var(--muted);
+      min-width: 200px;
+    }
+    .correction-status {
+      text-align: right;
+    }
+    .reviewed-by {
+      display: block;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    .reviewed-date {
+      display: block;
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
   </style>
 </head>
 <body>
@@ -795,12 +1068,28 @@
         <div id="salaryIntegration"></div>
       </div>
 
+      <!-- Pending Attendance Corrections -->
+      <div class="content-section">
+        <div class="section-header">
+          <h3><i class="fas fa-edit"></i> Pending Attendance Corrections</h3>
+        </div>
+        <div id="pendingCorrections"></div>
+      </div>
+
       <!-- All Leave Requests -->
       <div class="content-section">
         <div class="section-header">
           <h3><i class="fas fa-list"></i> All Leave Requests</h3>
         </div>
         <div id="allLeaveRequests"></div>
+      </div>
+
+      <!-- All Attendance Corrections -->
+      <div class="content-section">
+        <div class="section-header">
+          <h3><i class="fas fa-history"></i> All Attendance Corrections</h3>
+        </div>
+        <div id="allCorrections"></div>
       </div>
     </main>
   </div>
