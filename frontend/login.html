@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login - Payroll Management</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <script>
+    function showError(msg){ const el=document.getElementById('errorBox'); el.textContent=msg; el.style.display='block'; }
+    function clearError(){ const el=document.getElementById('errorBox'); el.style.display='none'; el.textContent=''; }
+
+    // Real authentication system
+    const API_BASE = 'http://localhost:4000/api';
+    
+    // User registration and authentication functions
+    async function authenticateUser(username, password) {
+      try {
+        const response = await fetch(`${API_BASE}/auth/login`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ username, password })
+        });
+        
+        if (!response.ok) {
+          throw new Error('Authentication failed');
+        }
+        
+        return await response.json();
+      } catch (error) {
+        console.error('Authentication error:', error);
+        return null;
+      }
+    }
+    
+    async function verify2FA(username, code, recoveryCode) {
+      try {
+        const response = await fetch(`${API_BASE}/auth/2fa`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ 
+            username, 
+            code: code || undefined, 
+            recoveryCode: recoveryCode || undefined 
+          })
+        });
+        
+        if (!response.ok) {
+          throw new Error('2FA verification failed');
+        }
+        
+        return await response.json();
+      } catch (error) {
+        console.error('2FA verification error:', error);
+        return null;
+      }
+    }
+
+    function onDomReady(){
+      document.getElementById('loginForm').addEventListener('submit', onLoginSubmit);
+      document.getElementById('twoFAForm').addEventListener('submit', onTwoFASubmit);
+      document.getElementById('useRecoveryBtn').addEventListener('click', ()=>{
+        document.getElementById('twoFACode').value='';
+        document.getElementById('recoveryCode').parentElement.style.display='block';
+        document.getElementById('twoFABadge').textContent='Using recovery code';
+      });
+      document.getElementById('backToCodeBtn').addEventListener('click', ()=>{
+        document.getElementById('recoveryCode').value='';
+        document.getElementById('recoveryCode').parentElement.style.display='none';
+        document.getElementById('twoFABadge').textContent='Enter 6-digit code';
+      });
+      // Role switcher
+      initRoleSwitcher();
+      // File-based autofill
+      initFileUpload();
+      // Update API status
+      checkAPIConnection();
+    }
+
+    let pendingUser = null;
+    let rememberMe = false;
+
+    async function onLoginSubmit(e){
+      e.preventDefault(); clearError();
+      const username=(document.getElementById('username').value||'').trim();
+      const password=document.getElementById('password').value||'';
+      rememberMe=document.getElementById('remember').checked;
+      if(!username || !password){ showError('Enter username and password.'); return; }
+      
+      // Show loading state
+      const submitBtn = document.querySelector('#loginForm button[type="submit"]');
+      const originalText = submitBtn.innerHTML;
+      submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Authenticating...';
+      submitBtn.disabled = true;
+      
+      try {
+        // Authenticate with real backend
+        const authResult = await authenticateUser(username, password);
+        
+        if (!authResult) {
+          showError('Invalid username or password.');
+          return;
+        }
+
+        // Check if 2FA is required
+        if (authResult.twoFARequired) {
+          pendingUser = username;
+          document.getElementById('loginForm').style.display='none';
+          document.getElementById('twoFAStep').style.display='block';
+          document.getElementById('twoFAUser').textContent=username;
+          document.getElementById('recoveryCode').parentElement.style.display='none';
+          document.getElementById('twoFACode').focus();
+        } else {
+          // No 2FA required, complete login
+          finalizeLogin(username, authResult.user);
+        }
+      } catch (error) {
+        showError('Authentication failed. Please try again.');
+      } finally {
+        // Restore button state
+        submitBtn.innerHTML = originalText;
+        submitBtn.disabled = false;
+      }
+    }
+
+    async function onTwoFASubmit(e){
+      e.preventDefault(); clearError();
+      const username=pendingUser; 
+      if(!username){ showError('Session expired. Try again.'); return; }
+      
+      const code=(document.getElementById('twoFACode').value||'').trim();
+      const rec=(document.getElementById('recoveryCode').value||'').trim();
+      
+      // Show loading state
+      const submitBtn = document.querySelector('#twoFAForm button[type="submit"]');
+      const originalText = submitBtn.innerHTML;
+      submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Verifying...';
+      submitBtn.disabled = true;
+      
+      try {
+        // Verify 2FA with real backend
+        const verifyResult = await verify2FA(username, code, rec);
+        
+        if (!verifyResult) {
+          showError('Invalid 2FA verification.');
+          return;
+        }
+
+        // Complete login
+        finalizeLogin(username, verifyResult.user);
+      } catch (error) {
+        showError('2FA verification failed. Please try again.');
+      } finally {
+        // Restore button state
+        submitBtn.innerHTML = originalText;
+        submitBtn.disabled = false;
+      }
+    }
+
+    function finalizeLogin(username, user, token = null){
+      // Store user data and authentication token
+      localStorage.setItem('userRole', user.role);
+      localStorage.setItem('username', username);
+      localStorage.setItem('fullName', user.fullName);
+      if (token) {
+        localStorage.setItem('authToken', token);
+      }
+      if(rememberMe){ localStorage.setItem('rememberMe', '1'); } else { localStorage.removeItem('rememberMe'); }
+      
+      // Store login history (will be sent to backend)
+      const loginHistory = {
+        timestamp: new Date().toISOString(),
+        ipAddress: getClientIP(),
+        device: navigator.userAgent,
+        status: 'Success',
+        location: await getClientLocation()
+      };
+      
+      // Send login history to backend
+      sendLoginHistory(username, loginHistory);
+      
+      // Redirect based on role
+      const role = user.role.toLowerCase();
+      if(role === 'hr' || role === 'admin'){ 
+        window.location.href='hr-dashboard.html'; 
+      } else if(role === 'crypto-trader'){
+        window.location.href='crypto-trader-dashboard.html';
+      } else { 
+        window.location.href='employee-dashboard.html'; 
+      }
+    }
+    
+    function getClientIP() {
+      // In production, this would be determined by the backend
+      return 'Unknown';
+    }
+    
+    async function getClientLocation() {
+      // In production, this would use a geolocation service
+      return 'Unknown';
+    }
+    
+    async function sendLoginHistory(username, loginHistory) {
+      try {
+        await fetch(`${API_BASE}/auth/login-history`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+          },
+          body: JSON.stringify({ username, loginHistory })
+        });
+      } catch (error) {
+        console.error('Failed to send login history:', error);
+      }
+    }
+
+    function initRoleSwitcher(){
+      // Remove demo role switcher - users must enter their own credentials
+      const select = document.getElementById('roleSelect');
+      if(select) {
+        select.style.display = 'none';
+        const label = select.previousElementSibling;
+        if(label) label.style.display = 'none';
+      }
+    }
+
+    function initFileUpload(){
+      // Remove file upload feature for security
+      const fileInput = document.getElementById('loginFile');
+      if(fileInput) {
+        fileInput.style.display = 'none';
+        const label = fileInput.previousElementSibling;
+        if(label) label.style.display = 'none';
+      }
+    }
+    
+    async function checkAPIConnection() {
+      try {
+        const response = await fetch(`${API_BASE}/health`, {
+          method: 'GET',
+          timeout: 5000
+        });
+        
+        if (response.ok) {
+          document.getElementById('apiStatus').textContent = 'API: Online';
+          document.getElementById('apiStatus').className = 'status-badge success';
+        } else {
+          throw new Error('API not responding');
+        }
+      } catch (error) {
+        document.getElementById('apiStatus').textContent = 'API: Offline';
+        document.getElementById('apiStatus').className = 'status-badge danger';
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', onDomReady);
+  </script>
+</head>
+<body>
+  <div class="auth-wrap">
+    <div class="auth-card">
+      <div class="auth-header">
+        <div class="brand"><i class="fas fa-chart-line"></i> Payroll Management</div>
+        <h1>Sign in to your account</h1>
+        <div class="hint">Enter your credentials to access the system. <span id="apiStatus" class="status-badge">Checking API...</span></div>
+      </div>
+      <div id="errorBox" class="error"></div>
+
+      <!-- Step 1: Credentials -->
+      <form id="loginForm">
+        <div class="form-group">
+          <label for="username">Username</label>
+          <input type="text" id="username" placeholder="e.g. aaron" autocomplete="username" required>
+        </div>
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" placeholder="Your password" autocomplete="current-password" required>
+        </div>
+        <div class="form-group" style="display:flex; align-items:center; gap:10px;">
+          <input type="checkbox" id="remember" style="width:auto;">
+          <label for="remember" style="margin:0;">Remember this device</label>
+        </div>
+        <div class="modal-actions">
+          <button type="submit" class="primary-btn" style="width:100%; justify-content:center;">
+            <i class="fas fa-right-to-bracket"></i> Continue
+          </button>
+        </div>
+      </form>
+
+      <!-- Step 2: 2FA -->
+      <div id="twoFAStep" style="display:none;">
+        <div class="divider"><span>Two-Factor Verification</span></div>
+        <div class="hint">Account: <strong id="twoFAUser">user</strong></div>
+        <form id="twoFAForm">
+          <div class="form-group">
+            <label>Authenticator Code <span id="twoFABadge" class="status-badge success" style="margin-left:6px;">Enter 6-digit code</span></label>
+            <input type="text" id="twoFACode" placeholder="123456" inputmode="numeric" pattern="\d{6}" maxlength="6">
+          </div>
+          <div class="form-group" style="display:none;">
+            <label>Recovery Code</label>
+            <input type="text" id="recoveryCode" placeholder="XXXX-XXXX">
+          </div>
+          <div class="modal-actions" style="justify-content:space-between;">
+            <div>
+              <button type="button" id="useRecoveryBtn" class="secondary-btn small"><i class="fas fa-key"></i> Use recovery</button>
+              <button type="button" id="backToCodeBtn" class="secondary-btn small"><i class="fas fa-rotate-left"></i> Use code</button>
+            </div>
+            <button type="submit" class="primary-btn"><i class="fas fa-lock-open"></i> Verify & Sign in</button>
+          </div>
+        </form>
+      </div>
+
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,43 @@
+{
+  "name": "payrollpro-backend",
+  "version": "1.0.0",
+  "description": "PayrollPro Backend API",
+  "main": "server.js",
+  "scripts": {
+    "start": "node mysqli-server.js",
+    "dev": "nodemon mysqli-server.js",
+    "db:setup": "mysql -u root -p < database/mysql-schema.sql",
+    "db:seed": "node mysql-seed.js",
+    "test": "jest"
+  },
+  "dependencies": {
+    "mysql2": "^3.6.0",
+    "express": "^4.18.2",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2",
+    "speakeasy": "^2.0.0",
+    "qrcode": "^1.5.3",
+    "cors": "^2.8.5",
+    "helmet": "^7.0.0",
+    "express-rate-limit": "^6.8.1",
+    "dotenv": "^16.3.1",
+    "crypto": "^1.0.1"
+  },
+  "devDependencies": {
+    "prisma": "^5.0.0",
+    "nodemon": "^3.0.1",
+    "jest": "^29.6.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "payroll",
+    "crypto",
+    "hr",
+    "api",
+    "backend"
+  ],
+  "author": "PayrollPro Team",
+  "license": "MIT"
+}

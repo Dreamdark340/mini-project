@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shift Scheduling - Payroll Management</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <script>
+    function logout(){ localStorage.removeItem('authToken'); localStorage.removeItem('userRole'); localStorage.removeItem('username'); localStorage.removeItem('fullName'); window.location.href='login.html'; }
+    function checkAuth(){ const t=localStorage.getItem('authToken'); const r=localStorage.getItem('userRole'); const u=localStorage.getItem('username'); if(!t||!r||!u){ window.location.href='login.html'; return; } document.getElementById('currentUser').innerHTML=`<span>${localStorage.getItem('fullName') || u}</span><span class="role-badge">${r.toUpperCase()}</span>`; document.body.classList.add('employee-theme'); loadShiftData(); }
+    
+    let currentDate = new Date();
+    let currentView = 'week'; // week, month
+    
+    function loadShiftData() {
+        const username = localStorage.getItem('username');
+        const userRole = localStorage.getItem('userRole');
+        
+        if (userRole === 'hr' || userRole === 'admin') {
+            document.getElementById('hrControls').style.display = 'block';
+            loadAllShifts();
+        } else {
+            loadEmployeeShifts(username);
+        }
+        
+        generateDemoShifts();
+        displayCalendar();
+        loadSwapRequests();
+    }
+    
+    function generateDemoShifts() {
+        const shifts = JSON.parse(localStorage.getItem('shiftSchedule') || '[]');
+        if (shifts.length === 0) {
+            const demoShifts = [
+                {
+                    id: 1,
+                    employeeId: 'EMP0001',
+                    employeeName: 'Aaron Employee',
+                    date: '2025-03-25',
+                    startTime: '09:00',
+                    endTime: '17:00',
+                    shiftType: 'Day',
+                    department: 'Operations',
+                    status: 'Scheduled'
+                },
+                {
+                    id: 2,
+                    employeeId: 'EMP0002',
+                    employeeName: 'Sarah Johnson',
+                    date: '2025-03-25',
+                    startTime: '13:00',
+                    endTime: '21:00',
+                    shiftType: 'Afternoon',
+                    department: 'Marketing',
+                    status: 'Scheduled'
+                },
+                {
+                    id: 3,
+                    employeeId: 'EMP0001',
+                    employeeName: 'Aaron Employee',
+                    date: '2025-03-26',
+                    startTime: '09:00',
+                    endTime: '17:00',
+                    shiftType: 'Day',
+                    department: 'Operations',
+                    status: 'Scheduled'
+                },
+                {
+                    id: 4,
+                    employeeId: 'EMP0003',
+                    employeeName: 'Michael Chen',
+                    date: '2025-03-26',
+                    startTime: '17:00',
+                    endTime: '01:00',
+                    shiftType: 'Night',
+                    department: 'Engineering',
+                    status: 'Scheduled'
+                }
+            ];
+            localStorage.setItem('shiftSchedule', JSON.stringify(demoShifts));
+        }
+    }
+    
+    function loadEmployeeShifts(username) {
+        const shifts = JSON.parse(localStorage.getItem('shiftSchedule') || '[]');
+        const employeeId = localStorage.getItem('employeeId') || 'EMP0001';
+        const employeeShifts = shifts.filter(shift => shift.employeeId === employeeId);
+        
+        displayEmployeeShifts(employeeShifts);
+    }
+    
+    function loadAllShifts() {
+        const shifts = JSON.parse(localStorage.getItem('shiftSchedule') || '[]');
+        displayAllShifts(shifts);
+    }
+    
+    function displayEmployeeShifts(shifts) {
+        const container = document.getElementById('shiftsContainer');
+        
+        if (shifts.length === 0) {
+            container.innerHTML = '<div class="no-data">No shifts scheduled</div>';
+            return;
+        }
+        
+        container.innerHTML = shifts.map(shift => `
+            <div class="shift-card">
+                <div class="shift-date">
+                    <i class="fas fa-calendar"></i>
+                    ${new Date(shift.date).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
+                </div>
+                <div class="shift-time">
+                    <i class="fas fa-clock"></i>
+                    ${shift.startTime} - ${shift.endTime}
+                </div>
+                <div class="shift-type ${shift.shiftType.toLowerCase()}">
+                    <i class="fas fa-sun"></i>
+                    ${shift.shiftType} Shift
+                </div>
+                <div class="shift-actions">
+                    <button class="secondary-btn small" onclick="requestShiftSwap(${shift.id})">
+                        <i class="fas fa-exchange-alt"></i> Request Swap
+                    </button>
+                </div>
+            </div>
+        `).join('');
+    }
+    
+    function displayAllShifts(shifts) {
+        const tbody = document.getElementById('allShiftsBody');
+        
+        if (shifts.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" class="no-data">No shifts scheduled</td></tr>';
+            return;
+        }
+        
+        tbody.innerHTML = shifts.map(shift => `
+            <tr>
+                <td>${shift.employeeName}</td>
+                <td>${new Date(shift.date).toLocaleDateString()}</td>
+                <td>${shift.startTime} - ${shift.endTime}</td>
+                <td><span class="shift-badge ${shift.shiftType.toLowerCase()}">${shift.shiftType}</span></td>
+                <td>${shift.department}</td>
+                <td>
+                    <button class="secondary-btn small" onclick="editShift(${shift.id})">
+                        <i class="fas fa-edit"></i> Edit
+                    </button>
+                    <button class="danger small" onclick="deleteShift(${shift.id})">
+                        <i class="fas fa-trash"></i> Delete
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+    }
+    
+    function displayCalendar() {
+        const calendarContainer = document.getElementById('calendarContainer');
+        const today = new Date(currentDate);
+        
+        if (currentView === 'week') {
+            displayWeekView(today);
+        } else {
+            displayMonthView(today);
+        }
+    }
+    
+    function displayWeekView(date) {
+        const weekStart = new Date(date);
+        weekStart.setDate(date.getDate() - date.getDay());
+        
+        const calendarHTML = `
+            <div class="calendar-header">
+                <button onclick="changeWeek(-1)"><i class="fas fa-chevron-left"></i></button>
+                <h3>${weekStart.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })} - Week ${getWeekNumber(weekStart)}</h3>
+                <button onclick="changeWeek(1)"><i class="fas fa-chevron-right"></i></button>
+            </div>
+            <div class="week-grid">
+                ${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => `
+                    <div class="day-header">${day}</div>
+                `).join('')}
+                ${Array.from({length: 7}, (_, i) => {
+                    const dayDate = new Date(weekStart);
+                    dayDate.setDate(weekStart.getDate() + i);
+                    const dayShifts = getShiftsForDate(dayDate);
+                    return `
+                        <div class="day-cell ${isToday(dayDate) ? 'today' : ''}">
+                            <div class="day-number">${dayDate.getDate()}</div>
+                            <div class="day-shifts">
+                                ${dayShifts.map(shift => `
+                                    <div class="shift-item ${shift.shiftType.toLowerCase()}" title="${shift.employeeName} - ${shift.startTime}-${shift.endTime}">
+                                        ${shift.startTime}-${shift.endTime}
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        `;
+        
+        document.getElementById('calendarContainer').innerHTML = calendarHTML;
+    }
+    
+    function displayMonthView(date) {
+        const year = date.getFullYear();
+        const month = date.getMonth();
+        const firstDay = new Date(year, month, 1);
+        const lastDay = new Date(year, month + 1, 0);
+        const startDate = new Date(firstDay);
+        startDate.setDate(startDate.getDate() - firstDay.getDay());
+        
+        const calendarHTML = `
+            <div class="calendar-header">
+                <button onclick="changeMonth(-1)"><i class="fas fa-chevron-left"></i></button>
+                <h3>${date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</h3>
+                <button onclick="changeMonth(1)"><i class="fas fa-chevron-right"></i></button>
+            </div>
+            <div class="month-grid">
+                ${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => `
+                    <div class="day-header">${day}</div>
+                `).join('')}
+                ${Array.from({length: 42}, (_, i) => {
+                    const dayDate = new Date(startDate);
+                    dayDate.setDate(startDate.getDate() + i);
+                    const isCurrentMonth = dayDate.getMonth() === month;
+                    const dayShifts = getShiftsForDate(dayDate);
+                    return `
+                        <div class="day-cell ${!isCurrentMonth ? 'other-month' : ''} ${isToday(dayDate) ? 'today' : ''}">
+                            <div class="day-number">${dayDate.getDate()}</div>
+                            <div class="day-shifts">
+                                ${dayShifts.slice(0, 2).map(shift => `
+                                    <div class="shift-item ${shift.shiftType.toLowerCase()}" title="${shift.employeeName} - ${shift.startTime}-${shift.endTime}">
+                                        ${shift.startTime}
+                                    </div>
+                                `).join('')}
+                                ${dayShifts.length > 2 ? `<div class="more-shifts">+${dayShifts.length - 2} more</div>` : ''}
+                            </div>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        `;
+        
+        document.getElementById('calendarContainer').innerHTML = calendarHTML;
+    }
+    
+    function getShiftsForDate(date) {
+        const shifts = JSON.parse(localStorage.getItem('shiftSchedule') || '[]');
+        const dateStr = date.toISOString().split('T')[0];
+        return shifts.filter(shift => shift.date === dateStr);
+    }
+    
+    function isToday(date) {
+        const today = new Date();
+        return date.toDateString() === today.toDateString();
+    }
+    
+    function getWeekNumber(date) {
+        const firstDayOfYear = new Date(date.getFullYear(), 0, 1);
+        const pastDaysOfYear = (date - firstDayOfYear) / 86400000;
+        return Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7);
+    }
+    
+    function changeWeek(direction) {
+        currentDate.setDate(currentDate.getDate() + (direction * 7));
+        displayCalendar();
+    }
+    
+    function changeMonth(direction) {
+        currentDate.setMonth(currentDate.getMonth() + direction);
+        displayCalendar();
+    }
+    
+    function switchView(view) {
+        currentView = view;
+        document.getElementById('weekBtn').classList.toggle('active', view === 'week');
+        document.getElementById('monthBtn').classList.toggle('active', view === 'month');
+        displayCalendar();
+    }
+    
+    function openNewShiftModal() {
+        document.getElementById('newShiftModal').style.display = 'block';
+        loadEmployees();
+    }
+    
+    function closeNewShiftModal() {
+        document.getElementById('newShiftModal').style.display = 'none';
+        document.getElementById('newShiftForm').reset();
+    }
+    
+    function loadEmployees() {
+        const employees = JSON.parse(localStorage.getItem('employeeDirectory') || '[]');
+        const select = document.getElementById('shiftEmployee');
+        select.innerHTML = '<option value="">Select Employee...</option>' +
+            employees.map(emp => `<option value="${emp.employeeId}">${emp.name} (${emp.employeeId})</option>`).join('');
+    }
+    
+    function submitNewShift(e) {
+        e.preventDefault();
+        const formData = new FormData(e.target);
+        const employees = JSON.parse(localStorage.getItem('employeeDirectory') || '[]');
+        const selectedEmployee = employees.find(emp => emp.employeeId === formData.get('employeeId'));
+        
+        if (!selectedEmployee) {
+            alert('Please select a valid employee');
+            return;
+        }
+        
+        const shift = {
+            id: Date.now(),
+            employeeId: formData.get('employeeId'),
+            employeeName: selectedEmployee.name,
+            date: formData.get('date'),
+            startTime: formData.get('startTime'),
+            endTime: formData.get('endTime'),
+            shiftType: formData.get('shiftType'),
+            department: selectedEmployee.department,
+            status: 'Scheduled'
+        };
+        
+        const shifts = JSON.parse(localStorage.getItem('shiftSchedule') || '[]');
+        shifts.push(shift);
+        localStorage.setItem('shiftSchedule', JSON.stringify(shifts));
+        
+        closeNewShiftModal();
+        loadShiftData();
+        displayCalendar();
+    }
+    
+    function requestShiftSwap(shiftId) {
+        const shifts = JSON.parse(localStorage.getItem('shiftSchedule') || '[]');
+        const shift = shifts.find(s => s.id === shiftId);
+        
+        if (!shift) return;
+        
+        const swapRequest = {
+            id: Date.now(),
+            originalShiftId: shiftId,
+            requesterId: localStorage.getItem('employeeId') || 'EMP0001',
+            requesterName: localStorage.getItem('fullName') || localStorage.getItem('username'),
+            date: shift.date,
+            startTime: shift.startTime,
+            endTime: shift.endTime,
+            shiftType: shift.shiftType,
+            reason: prompt('Reason for swap request:') || 'Personal reasons',
+            status: 'Pending',
+            submittedDate: new Date().toISOString()
+        };
+        
+        const requests = JSON.parse(localStorage.getItem('swapRequests') || '[]');
+        requests.unshift(swapRequest);
+        localStorage.setItem('swapRequests', JSON.stringify(requests));
+        
+        alert('Shift swap request submitted successfully!');
+        loadSwapRequests();
+    }
+    
+    function loadSwapRequests() {
+        const requests = JSON.parse(localStorage.getItem('swapRequests') || '[]');
+        const tbody = document.getElementById('swapRequestsBody');
+        
+        if (requests.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="no-data">No swap requests found</td></tr>';
+            return;
+        }
+        
+        tbody.innerHTML = requests.map(request => `
+            <tr>
+                <td>${request.requesterName}</td>
+                <td>${new Date(request.date).toLocaleDateString()}</td>
+                <td>${request.startTime} - ${request.endTime}</td>
+                <td><span class="status-badge ${getStatusClass(request.status)}">${request.status}</span></td>
+                <td>
+                    ${request.status === 'Pending' ? `
+                        <button class="primary-btn small" onclick="approveSwapRequest(${request.id})">
+                            <i class="fas fa-check"></i> Approve
+                        </button>
+                        <button class="danger small" onclick="rejectSwapRequest(${request.id})">
+                            <i class="fas fa-times"></i> Reject
+                        </button>
+                    ` : ''}
+                </td>
+            </tr>
+        `).join('');
+    }
+    
+    function getStatusClass(status) {
+        switch(status) {
+            case 'Approved': return 'success';
+            case 'Pending': return 'warning';
+            case 'Rejected': return 'danger';
+            default: return 'warning';
+        }
+    }
+    
+    function approveSwapRequest(requestId) {
+        const requests = JSON.parse(localStorage.getItem('swapRequests') || '[]');
+        const request = requests.find(r => r.id === requestId);
+        
+        if (request) {
+            request.status = 'Approved';
+            localStorage.setItem('swapRequests', JSON.stringify(requests));
+            loadSwapRequests();
+        }
+    }
+    
+    function rejectSwapRequest(requestId) {
+        const requests = JSON.parse(localStorage.getItem('swapRequests') || '[]');
+        const request = requests.find(r => r.id === requestId);
+        
+        if (request) {
+            request.status = 'Rejected';
+            localStorage.setItem('swapRequests', JSON.stringify(requests));
+            loadSwapRequests();
+        }
+    }
+    
+    // Close modals when clicking outside
+    window.onclick = function(event) {
+        const modals = [
+            document.getElementById('newShiftModal')
+        ];
+        modals.forEach(modal => {
+            if (event.target === modal) {
+                modal.style.display = 'none';
+            }
+        });
+    }
+    
+    document.addEventListener('DOMContentLoaded', checkAuth);
+  </script>
+  <style>
+    .calendar-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 15px;
+    }
+    .calendar-header button {
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .calendar-header button:hover {
+      background: var(--primary-600);
+    }
+    .view-toggle {
+      display: flex;
+      gap: 5px;
+      margin-bottom: 20px;
+    }
+    .view-toggle button {
+      padding: 8px 16px;
+      border: 1px solid var(--border);
+      background: var(--card);
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .view-toggle button.active {
+      background: var(--primary);
+      color: white;
+    }
+    .week-grid, .month-grid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 1px;
+      background: var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .day-header {
+      background: var(--primary);
+      color: white;
+      padding: 10px;
+      text-align: center;
+      font-weight: 600;
+    }
+    .day-cell {
+      background: var(--card);
+      min-height: 100px;
+      padding: 8px;
+      border: none;
+    }
+    .day-cell.today {
+      background: #e0f2fe;
+    }
+    .day-cell.other-month {
+      background: #f5f5f5;
+      color: #999;
+    }
+    .day-number {
+      font-weight: 600;
+      margin-bottom: 5px;
+    }
+    .day-shifts {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .shift-item {
+      font-size: 0.7rem;
+      padding: 2px 4px;
+      border-radius: 3px;
+      color: white;
+      cursor: pointer;
+    }
+    .shift-item.day { background: #4caf50; }
+    .shift-item.afternoon { background: #ff9800; }
+    .shift-item.night { background: #2196f3; }
+    .more-shifts {
+      font-size: 0.7rem;
+      color: var(--muted);
+      text-align: center;
+    }
+    .shift-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 15px;
+      margin-bottom: 10px;
+      box-shadow: var(--shadow);
+    }
+    .shift-card .shift-date {
+      font-weight: 600;
+      margin-bottom: 5px;
+    }
+    .shift-card .shift-time {
+      color: var(--muted);
+      margin-bottom: 5px;
+    }
+    .shift-badge {
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 0.8rem;
+      color: white;
+    }
+    .shift-badge.day { background: #4caf50; }
+    .shift-badge.afternoon { background: #ff9800; }
+    .shift-badge.night { background: #2196f3; }
+    .shift-type {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 8px;
+      border-radius: 12px;
+      font-size: 0.8rem;
+      margin-bottom: 10px;
+    }
+    .shift-type.day { background: #e8f5e8; color: #2e7d32; }
+    .shift-type.afternoon { background: #fff3e0; color: #f57c00; }
+    .shift-type.night { background: #e3f2fd; color: #1976d2; }
+    .shift-actions {
+      margin-top: 10px;
+    }
+    @media (max-width: 768px) {
+      .week-grid, .month-grid {
+        font-size: 0.8rem;
+      }
+      .day-cell {
+        min-height: 80px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="header-content">
+      <h1><i class="fas fa-calendar-alt"></i> Shift Scheduling</h1>
+      <div class="user-info">
+        <span id="currentUser">Loading...</span>
+        <button onclick="logout()" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</button>
+      </div>
+    </div>
+  </header>
+  
+  <div class="container">
+    <nav class="sidebar">
+      <div class="sidebar-header"><i class="fas fa-user-tie"></i><span>Employee Portal</span></div>
+      <ul class="nav-links">
+        <li><a href="employee-dashboard.html"><i class="fas fa-tachometer-alt"></i><span>Dashboard</span></a></li>
+        <li><a href="employee-reports.html"><i class="fas fa-file-alt"></i><span>My Reports</span></a></li>
+        <li><a href="employee-profile.html"><i class="fas fa-user-cog"></i><span>Profile</span></a></li>
+        <li><a href="time-tracking.html"><i class="fas fa-clock"></i><span>Time Tracking</span></a></li>
+        <li><a href="employee-directory.html"><i class="fas fa-users"></i><span>Directory</span></a></li>
+        <li><a href="leave-management.html"><i class="fas fa-calendar-alt"></i><span>Leave</span></a></li>
+        <li class="active"><a href="shift-scheduling.html"><i class="fas fa-calendar-alt"></i><span>Shifts</span></a></li>
+      </ul>
+    </nav>
+    
+    <main class="main-content">
+      <div class="page-header">
+        <h2><i class="fas fa-calendar-alt"></i> Shift Scheduling</h2>
+        <p>Manage work schedules and shift assignments.</p>
+      </div>
+      
+      <!-- HR Controls (only visible for HR/Admin) -->
+      <div id="hrControls" class="content-section" style="display: none;">
+        <div class="section-header">
+          <h3><i class="fas fa-users-cog"></i> Schedule Management</h3>
+          <button onclick="openNewShiftModal()" class="primary-btn">
+            <i class="fas fa-plus"></i> Assign Shift
+          </button>
+        </div>
+        
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Employee</th>
+                <th>Date</th>
+                <th>Time</th>
+                <th>Shift Type</th>
+                <th>Department</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="allShiftsBody">
+              <!-- Data will be populated here -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+      
+      <!-- Calendar View -->
+      <div class="content-section">
+        <div class="section-header">
+          <h3><i class="fas fa-calendar"></i> Schedule Calendar</h3>
+          <div class="view-toggle">
+            <button id="weekBtn" class="active" onclick="switchView('week')">Week</button>
+            <button id="monthBtn" onclick="switchView('month')">Month</button>
+          </div>
+        </div>
+        <div id="calendarContainer">
+          <!-- Calendar will be populated here -->
+        </div>
+      </div>
+      
+      <!-- Employee Shifts -->
+      <div class="content-section">
+        <div class="section-header">
+          <h3><i class="fas fa-user-clock"></i> My Shifts</h3>
+        </div>
+        <div id="shiftsContainer">
+          <!-- Employee shifts will be populated here -->
+        </div>
+      </div>
+      
+      <!-- Swap Requests (HR/Admin only) -->
+      <div id="swapRequestsSection" class="content-section" style="display: none;">
+        <div class="section-header">
+          <h3><i class="fas fa-exchange-alt"></i> Shift Swap Requests</h3>
+        </div>
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Requester</th>
+                <th>Date</th>
+                <th>Time</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="swapRequestsBody">
+              <!-- Data will be populated here -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+  
+  <footer><p>&copy; 2025 PayrollPro by Aaron | Shift Scheduling</p></footer>
+  
+  <!-- New Shift Modal -->
+  <div id="newShiftModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3><i class="fas fa-plus"></i> Assign New Shift</h3>
+        <span class="close" onclick="closeNewShiftModal()">&times;</span>
+      </div>
+      <form id="newShiftForm" onsubmit="submitNewShift(event)">
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="shiftEmployee">Employee</label>
+            <select name="employeeId" id="shiftEmployee" required>
+              <option value="">Select Employee...</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="date">Date</label>
+            <input type="date" name="date" required>
+          </div>
+          <div class="form-group">
+            <label for="startTime">Start Time</label>
+            <input type="time" name="startTime" required>
+          </div>
+          <div class="form-group">
+            <label for="endTime">End Time</label>
+            <input type="time" name="endTime" required>
+          </div>
+          <div class="form-group">
+            <label for="shiftType">Shift Type</label>
+            <select name="shiftType" required>
+              <option value="">Select type...</option>
+              <option value="Day">Day (6 AM - 2 PM)</option>
+              <option value="Afternoon">Afternoon (2 PM - 10 PM)</option>
+              <option value="Night">Night (10 PM - 6 AM)</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" onclick="closeNewShiftModal()" class="secondary-btn">Cancel</button>
+          <button type="submit" class="primary-btn">Assign Shift</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bank Transfers - Payroll Management</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <script>
+    function logout(){ localStorage.removeItem('authToken'); localStorage.removeItem('userRole'); localStorage.removeItem('username'); localStorage.removeItem('fullName'); window.location.href='login.html'; }
+    function checkAuth(){ const t=localStorage.getItem('authToken'); const r=localStorage.getItem('userRole'); const u=localStorage.getItem('username'); if(!t||!r||!u){ window.location.href='login.html'; return; } if(r!=='hr' && r!=='admin'){ alert('HR/Admin access required'); window.location.href='login.html'; return; } document.getElementById('currentUser').innerHTML=`<span>${localStorage.getItem('fullName') || u}</span><span class="role-badge">${r.toUpperCase()}</span>`; document.body.classList.add('employee-theme'); loadBankTransfers(); }
+    
+    function loadBankTransfers() {
+        generateEmployeeBankDetails();
+        loadTransferHistory();
+        loadPendingTransfers();
+        setupTransferSummary();
+    }
+    
+    function generateEmployeeBankDetails() {
+        const bankDetails = JSON.parse(localStorage.getItem('employeeBankDetails') || '[]');
+        if (bankDetails.length === 0) {
+            const employees = JSON.parse(localStorage.getItem('employeeDirectory') || '[]');
+            const demoBankDetails = employees.map((emp, index) => ({
+                employeeId: emp.employeeId,
+                employeeName: emp.name,
+                bankName: ['Chase Bank', 'Wells Fargo', 'Bank of America', 'Citibank', 'PNC Bank'][index % 5],
+                accountNumber: `****${String(1000 + index).padStart(4, '0')}`,
+                routingNumber: `${100000000 + index}`,
+                accountType: index % 3 === 0 ? 'Checking' : 'Savings',
+                netSalary: 3000 + (index * 500),
+                isActive: true,
+                lastUpdated: new Date().toISOString()
+            }));
+            localStorage.setItem('employeeBankDetails', JSON.stringify(demoBankDetails));
+        }
+    }
+    
+    function setupTransferSummary() {
+        const transfers = JSON.parse(localStorage.getItem('salaryTransfers') || '[]');
+        const currentMonth = new Date().toISOString().substring(0, 7);
+        const monthlyTransfers = transfers.filter(t => t.transferDate.startsWith(currentMonth));
+        
+        const totalAmount = monthlyTransfers.reduce((sum, t) => sum + t.amount, 0);
+        const successfulTransfers = monthlyTransfers.filter(t => t.status === 'Completed').length;
+        const failedTransfers = monthlyTransfers.filter(t => t.status === 'Failed').length;
+        const pendingTransfers = monthlyTransfers.filter(t => t.status === 'Pending').length;
+        
+        document.getElementById('totalTransfers').textContent = monthlyTransfers.length;
+        document.getElementById('totalAmount').textContent = `$${totalAmount.toLocaleString()}`;
+        document.getElementById('successfulTransfers').textContent = successfulTransfers;
+        document.getElementById('failedTransfers').textContent = failedTransfers;
+        document.getElementById('pendingTransfers').textContent = pendingTransfers;
+    }
+    
+    function loadTransferHistory() {
+        const transfers = JSON.parse(localStorage.getItem('salaryTransfers') || '[]');
+        const tbody = document.getElementById('transferHistoryBody');
+        
+        if (transfers.length === 0) {
+            // Generate demo transfer history
+            generateDemoTransfers();
+            loadTransferHistory(); // Reload after generating
+            return;
+        }
+        
+        tbody.innerHTML = transfers.sort((a, b) => new Date(b.transferDate) - new Date(a.transferDate)).map(transfer => `
+            <tr>
+                <td>${transfer.employeeName}</td>
+                <td>${transfer.employeeId}</td>
+                <td>${transfer.bankName}</td>
+                <td>$${transfer.amount.toFixed(2)}</td>
+                <td>${new Date(transfer.transferDate).toLocaleDateString()}</td>
+                <td><span class="status-badge ${getTransferStatusClass(transfer.status)}">${transfer.status}</span></td>
+                <td>${transfer.transactionId || '-'}</td>
+                <td>
+                    <button class="secondary-btn small" onclick="viewTransferDetails('${transfer.id}')">
+                        <i class="fas fa-eye"></i> View
+                    </button>
+                    ${transfer.status === 'Failed' ? `
+                        <button class="primary-btn small" onclick="retryTransfer('${transfer.id}')">
+                            <i class="fas fa-redo"></i> Retry
+                        </button>
+                    ` : ''}
+                </td>
+            </tr>
+        `).join('');
+    }
+    
+    function generateDemoTransfers() {
+        const bankDetails = JSON.parse(localStorage.getItem('employeeBankDetails') || '[]');
+        const transfers = [];
+        const today = new Date();
+        
+        // Generate transfers for the last 3 months
+        for (let i = 0; i < 3; i++) {
+            const month = new Date(today.getFullYear(), today.getMonth() - i, 5);
+            bankDetails.forEach((emp, index) => {
+                const statuses = ['Completed', 'Completed', 'Completed', 'Failed', 'Completed'];
+                const status = statuses[index % statuses.length];
+                
+                transfers.push({
+                    id: `transfer_${month.getFullYear()}_${month.getMonth()}_${index}`,
+                    employeeId: emp.employeeId,
+                    employeeName: emp.employeeName,
+                    bankName: emp.bankName,
+                    accountNumber: emp.accountNumber,
+                    routingNumber: emp.routingNumber,
+                    amount: emp.netSalary,
+                    transferDate: month.toISOString().split('T')[0],
+                    status: status,
+                    transactionId: status === 'Completed' ? `TXN${Date.now()}${index}` : null,
+                    initiatedBy: 'hr1',
+                    initiatedAt: new Date(month.getTime() - 86400000).toISOString(),
+                    completedAt: status === 'Completed' ? month.toISOString() : null,
+                    failureReason: status === 'Failed' ? 'Insufficient funds' : null
+                });
+            });
+        }
+        
+        localStorage.setItem('salaryTransfers', JSON.stringify(transfers));
+    }
+    
+    function loadPendingTransfers() {
+        const bankDetails = JSON.parse(localStorage.getItem('employeeBankDetails') || '[]');
+        const container = document.getElementById('pendingTransfersContainer');
+        
+        container.innerHTML = bankDetails.map(emp => `
+            <div class="employee-transfer-card">
+                <div class="employee-info">
+                    <div class="employee-name">${emp.employeeName}</div>
+                    <div class="employee-id">${emp.employeeId}</div>
+                    <div class="bank-details">
+                        <span class="bank-name">${emp.bankName}</span>
+                        <span class="account-number">${emp.accountNumber}</span>
+                    </div>
+                </div>
+                <div class="transfer-amount">
+                    <div class="amount">$${emp.netSalary.toFixed(2)}</div>
+                    <div class="amount-label">Net Salary</div>
+                </div>
+                <div class="transfer-actions">
+                    <label class="checkbox-label">
+                        <input type="checkbox" class="transfer-checkbox" data-employee-id="${emp.employeeId}" data-amount="${emp.netSalary}">
+                        <span class="checkmark"></span>
+                        Include
+                    </label>
+                </div>
+            </div>
+        `).join('');
+    }
+    
+    function getTransferStatusClass(status) {
+        switch(status) {
+            case 'Completed': return 'success';
+            case 'Failed': return 'danger';
+            case 'Pending': return 'warning';
+            case 'Processing': return 'primary';
+            default: return 'secondary';
+        }
+    }
+    
+    function selectAllTransfers() {
+        const checkboxes = document.querySelectorAll('.transfer-checkbox');
+        checkboxes.forEach(cb => cb.checked = true);
+    }
+    
+    function deselectAllTransfers() {
+        const checkboxes = document.querySelectorAll('.transfer-checkbox');
+        checkboxes.forEach(cb => cb.checked = false);
+    }
+    
+    function initiateBulkTransfer() {
+        const selectedCheckboxes = document.querySelectorAll('.transfer-checkbox:checked');
+        
+        if (selectedCheckboxes.length === 0) {
+            alert('Please select at least one employee for transfer');
+            return;
+        }
+        
+        const totalAmount = Array.from(selectedCheckboxes).reduce((sum, cb) => {
+            return sum + parseFloat(cb.dataset.amount);
+        }, 0);
+        
+        const confirmMessage = `Initiate salary transfer for ${selectedCheckboxes.length} employees?\n\nTotal Amount: $${totalAmount.toFixed(2)}\n\nThis action cannot be undone.`;
+        
+        if (!confirm(confirmMessage)) return;
+        
+        // Simulate bulk transfer
+        const transfers = JSON.parse(localStorage.getItem('salaryTransfers') || '[]');
+        const today = new Date().toISOString().split('T')[0];
+        
+        selectedCheckboxes.forEach((cb, index) => {
+            const employeeId = cb.dataset.amount;
+            const amount = parseFloat(cb.dataset.amount);
+            const bankDetails = JSON.parse(localStorage.getItem('employeeBankDetails') || '[]');
+            const emp = bankDetails.find(e => e.employeeId === employeeId);
+            
+            if (emp) {
+                const transfer = {
+                    id: `transfer_${Date.now()}_${index}`,
+                    employeeId: emp.employeeId,
+                    employeeName: emp.employeeName,
+                    bankName: emp.bankName,
+                    accountNumber: emp.accountNumber,
+                    routingNumber: emp.routingNumber,
+                    amount: amount,
+                    transferDate: today,
+                    status: 'Processing',
+                    transactionId: null,
+                    initiatedBy: localStorage.getItem('username'),
+                    initiatedAt: new Date().toISOString(),
+                    completedAt: null,
+                    failureReason: null
+                };
+                
+                transfers.unshift(transfer);
+            }
+        });
+        
+        localStorage.setItem('salaryTransfers', JSON.stringify(transfers));
+        
+        // Simulate processing delay
+        setTimeout(() => {
+            processTransfers(selectedCheckboxes);
+        }, 2000);
+        
+        alert(`Bulk transfer initiated for ${selectedCheckboxes.length} employees. Processing...`);
+        loadTransferHistory();
+        loadPendingTransfers();
+        setupTransferSummary();
+    }
+    
+    function processTransfers(selectedCheckboxes) {
+        const transfers = JSON.parse(localStorage.getItem('salaryTransfers') || '[]');
+        const today = new Date();
+        
+        selectedCheckboxes.forEach((cb, index) => {
+            const employeeId = cb.dataset.amount;
+            const transfer = transfers.find(t => t.employeeId === employeeId && t.status === 'Processing');
+            
+            if (transfer) {
+                // Simulate random success/failure
+                const isSuccess = Math.random() > 0.1; // 90% success rate
+                
+                transfer.status = isSuccess ? 'Completed' : 'Failed';
+                transfer.completedAt = today.toISOString();
+                transfer.transactionId = isSuccess ? `TXN${Date.now()}${index}` : null;
+                transfer.failureReason = isSuccess ? null : 'Bank processing error';
+            }
+        });
+        
+        localStorage.setItem('salaryTransfers', JSON.stringify(transfers));
+        loadTransferHistory();
+        setupTransferSummary();
+        
+        // Show completion notification
+        const successCount = selectedCheckboxes.length - Math.floor(selectedCheckboxes.length * 0.1);
+        const failCount = selectedCheckboxes.length - successCount;
+        alert(`Transfer processing completed!\n\nSuccessful: ${successCount}\nFailed: ${failCount}`);
+    }
+    
+    function retryTransfer(transferId) {
+        const transfers = JSON.parse(localStorage.getItem('salaryTransfers') || '[]');
+        const transfer = transfers.find(t => t.id === transferId);
+        
+        if (!transfer) return;
+        
+        transfer.status = 'Processing';
+        transfer.completedAt = null;
+        transfer.failureReason = null;
+        transfer.retryCount = (transfer.retryCount || 0) + 1;
+        
+        localStorage.setItem('salaryTransfers', JSON.stringify(transfers));
+        loadTransferHistory();
+        
+        // Simulate retry processing
+        setTimeout(() => {
+            transfer.status = 'Completed';
+            transfer.completedAt = new Date().toISOString();
+            transfer.transactionId = `TXN${Date.now()}`;
+            localStorage.setItem('salaryTransfers', JSON.stringify(transfers));
+            loadTransferHistory();
+            setupTransferSummary();
+            alert('Transfer retry successful!');
+        }, 3000);
+        
+        alert('Retrying transfer...');
+    }
+    
+    function viewTransferDetails(transferId) {
+        const transfers = JSON.parse(localStorage.getItem('salaryTransfers') || '[]');
+        const transfer = transfers.find(t => t.id === transferId);
+        
+        if (!transfer) return;
+        
+        const details = `
+Transfer Details:
+================
+
+Employee: ${transfer.employeeName} (${transfer.employeeId})
+Bank: ${transfer.bankName}
+Account: ${transfer.accountNumber}
+Routing: ${transfer.routingNumber}
+Amount: $${transfer.amount.toFixed(2)}
+Transfer Date: ${new Date(transfer.transferDate).toLocaleDateString()}
+Status: ${transfer.status}
+${transfer.transactionId ? `Transaction ID: ${transfer.transactionId}` : ''}
+${transfer.failureReason ? `Failure Reason: ${transfer.failureReason}` : ''}
+Initiated By: ${transfer.initiatedBy}
+Initiated At: ${new Date(transfer.initiatedAt).toLocaleString()}
+${transfer.completedAt ? `Completed At: ${new Date(transfer.completedAt).toLocaleString()}` : ''}
+        `;
+        
+        alert(details);
+    }
+    
+    function exportTransferReport() {
+        const transfers = JSON.parse(localStorage.getItem('salaryTransfers') || '[]');
+        const currentMonth = new Date().toISOString().substring(0, 7);
+        const monthlyTransfers = transfers.filter(t => t.transferDate.startsWith(currentMonth));
+        
+        const csvContent = [
+            ['Employee ID', 'Employee Name', 'Bank Name', 'Amount', 'Transfer Date', 'Status', 'Transaction ID'],
+            ...monthlyTransfers.map(t => [
+                t.employeeId,
+                t.employeeName,
+                t.bankName,
+                t.amount.toFixed(2),
+                t.transferDate,
+                t.status,
+                t.transactionId || ''
+            ])
+        ].map(row => row.join(',')).join('\n');
+        
+        const blob = new Blob([csvContent], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `salary_transfers_${currentMonth}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    }
+    
+    document.addEventListener('DOMContentLoaded', checkAuth);
+  </script>
+  <style>
+    .transfer-summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+    .summary-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      text-align: center;
+      box-shadow: var(--shadow);
+    }
+    .summary-card h4 {
+      margin: 0 0 10px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .summary-card .value {
+      font-size: 1.5rem;
+      font-weight: bold;
+      color: var(--primary);
+    }
+    .bulk-transfer-section {
+      background: #f0f9ff;
+      border: 1px solid #0ea5e9;
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 30px;
+    }
+    .employee-transfer-card {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      padding: 15px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-bottom: 15px;
+      box-shadow: var(--shadow);
+    }
+    .employee-info {
+      flex: 1;
+    }
+    .employee-name {
+      font-weight: 600;
+      margin-bottom: 5px;
+    }
+    .employee-id {
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin-bottom: 5px;
+    }
+    .bank-details {
+      display: flex;
+      gap: 15px;
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+    .transfer-amount {
+      text-align: center;
+      min-width: 120px;
+    }
+    .transfer-amount .amount {
+      font-size: 1.2rem;
+      font-weight: bold;
+      color: var(--primary);
+    }
+    .transfer-amount .amount-label {
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .transfer-actions {
+      min-width: 120px;
+    }
+    .checkbox-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .transfer-checkbox {
+      width: 18px;
+      height: 18px;
+      cursor: pointer;
+    }
+    .bulk-actions {
+      display: flex;
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+    @media (max-width: 768px) {
+      .transfer-summary {
+        grid-template-columns: 1fr;
+      }
+      .employee-transfer-card {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 15px;
+      }
+      .transfer-amount {
+        text-align: left;
+      }
+      .bulk-actions {
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="header-content">
+      <h1><i class="fas fa-university"></i> Bank Transfers</h1>
+      <div class="user-info">
+        <span id="currentUser">Loading...</span>
+        <button onclick="logout()" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</button>
+      </div>
+    </div>
+  </header>
+  
+  <div class="container">
+    <nav class="sidebar">
+      <div class="sidebar-header"><i class="fas fa-user-tie"></i><span>HR Portal</span></div>
+      <ul class="nav-links">
+        <li><a href="hr-dashboard.html"><i class="fas fa-users"></i><span>HR Dashboard</span></a></li>
+        <li><a href="employee-directory.html"><i class="fas fa-users"></i><span>Directory</span></a></li>
+        <li><a href="performance-reviews.html"><i class="fas fa-chart-line"></i><span>Performance</span></a></li>
+        <li><a href="audit-compliance.html"><i class="fas fa-shield-alt"></i><span>Audit</span></a></li>
+        <li><a href="payroll-calendar.html"><i class="fas fa-calendar-alt"></i><span>Payroll Calendar</span></a></li>
+        <li><a href="tax-calculator.html"><i class="fas fa-calculator"></i><span>Tax Calculator</span></a></li>
+        <li><a href="salary-components.html"><i class="fas fa-coins"></i><span>Salary Components</span></a></li>
+        <li class="active"><a href="bank-transfers.html"><i class="fas fa-university"></i><span>Bank Transfers</span></a></li>
+      </ul>
+    </nav>
+    
+    <main class="main-content">
+      <div class="page-header">
+        <h2><i class="fas fa-university"></i> Bank Transfers</h2>
+        <p>Manage salary disbursements and bank transfer processing.</p>
+      </div>
+      
+      <!-- Transfer Summary -->
+      <div class="transfer-summary">
+        <div class="summary-card">
+          <h4>Total Transfers (This Month)</h4>
+          <div class="value" id="totalTransfers">0</div>
+        </div>
+        <div class="summary-card">
+          <h4>Total Amount</h4>
+          <div class="value" id="totalAmount">$0</div>
+        </div>
+        <div class="summary-card">
+          <h4>Successful</h4>
+          <div class="value" id="successfulTransfers">0</div>
+        </div>
+        <div class="summary-card">
+          <h4>Failed</h4>
+          <div class="value" id="failedTransfers">0</div>
+        </div>
+        <div class="summary-card">
+          <h4>Pending</h4>
+          <div class="value" id="pendingTransfers">0</div>
+        </div>
+      </div>
+      
+      <!-- Bulk Transfer Section -->
+      <div class="bulk-transfer-section">
+        <h3><i class="fas fa-money-bill-wave"></i> Bulk Salary Transfer</h3>
+        <p>Select employees and initiate salary transfers for the current payroll cycle.</p>
+        
+        <div class="bulk-actions">
+          <button onclick="selectAllTransfers()" class="secondary-btn">
+            <i class="fas fa-check-square"></i> Select All
+          </button>
+          <button onclick="deselectAllTransfers()" class="secondary-btn">
+            <i class="fas fa-square"></i> Deselect All
+          </button>
+          <button onclick="initiateBulkTransfer()" class="primary-btn">
+            <i class="fas fa-paper-plane"></i> Initiate Bulk Transfer
+          </button>
+        </div>
+        
+        <div id="pendingTransfersContainer">
+          <!-- Employee transfer cards will be populated here -->
+        </div>
+      </div>
+      
+      <!-- Transfer History -->
+      <div class="content-section">
+        <div class="section-header">
+          <h3><i class="fas fa-history"></i> Transfer History</h3>
+          <button onclick="exportTransferReport()" class="secondary-btn">
+            <i class="fas fa-download"></i> Export Report
+          </button>
+        </div>
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Employee</th>
+                <th>ID</th>
+                <th>Bank</th>
+                <th>Amount</th>
+                <th>Transfer Date</th>
+                <th>Status</th>
+                <th>Transaction ID</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="transferHistoryBody">
+              <!-- Data will be populated here -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+  
+  <footer><p>&copy; 2025 PayrollPro by Aaron | Bank Transfers</p></footer>
+</body>
+</html>

@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Audit & Compliance - Payroll Management</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <script>
+    function logout(){ localStorage.removeItem('authToken'); localStorage.removeItem('userRole'); localStorage.removeItem('username'); localStorage.removeItem('fullName'); window.location.href='login.html'; }
+    function checkAuth(){ const t=localStorage.getItem('authToken'); const r=localStorage.getItem('userRole'); const u=localStorage.getItem('username'); if(!t||!r||!u){ window.location.href='login.html'; return; } if(r!=='admin'){ alert('Admin access required'); window.location.href='login.html'; return; } document.getElementById('currentUser').innerHTML=`<span>${localStorage.getItem('fullName') || u}</span><span class="role-badge">ADMIN</span>`; document.body.classList.add('employee-theme'); loadAuditData(); }
+    
+    function loadAuditData() {
+        loadAuditSummary();
+        loadAuditLogs();
+        generateDemoAuditLogs();
+    }
+    
+    function generateDemoAuditLogs() {
+        const logs = JSON.parse(localStorage.getItem('auditLogs') || '[]');
+        if (logs.length === 0) {
+            const demoLogs = [
+                {
+                    id: 1,
+                    timestamp: new Date(Date.now() - 3600000).toISOString(),
+                    userId: 'admin',
+                    userName: 'Alex Admin',
+                    action: 'LOGIN',
+                    resource: 'System',
+                    details: 'Successful login from 192.168.1.100',
+                    ipAddress: '192.168.1.100',
+                    userAgent: navigator.userAgent,
+                    status: 'SUCCESS',
+                    severity: 'INFO'
+                },
+                {
+                    id: 2,
+                    timestamp: new Date(Date.now() - 7200000).toISOString(),
+                    userId: 'hr1',
+                    userName: 'Harper HR',
+                    action: 'CREATE_EMPLOYEE',
+                    resource: 'Employee Management',
+                    details: 'Created new employee: Sarah Johnson (EMP0002)',
+                    ipAddress: '192.168.1.101',
+                    userAgent: navigator.userAgent,
+                    status: 'SUCCESS',
+                    severity: 'INFO'
+                },
+                {
+                    id: 3,
+                    timestamp: new Date(Date.now() - 10800000).toISOString(),
+                    userId: 'hr1',
+                    userName: 'Harper HR',
+                    action: 'MODIFY_PAYROLL',
+                    resource: 'Payroll System',
+                    details: 'Modified payroll entry for Aaron Employee - Changed base salary from $2500 to $2700',
+                    ipAddress: '192.168.1.101',
+                    userAgent: navigator.userAgent,
+                    status: 'SUCCESS',
+                    severity: 'WARNING'
+                },
+                {
+                    id: 4,
+                    timestamp: new Date(Date.now() - 14400000).toISOString(),
+                    userId: 'aaron',
+                    userName: 'Aaron Employee',
+                    action: 'ACCESS_DENIED',
+                    resource: 'HR Dashboard',
+                    details: 'Attempted to access HR dashboard without proper permissions',
+                    ipAddress: '192.168.1.102',
+                    userAgent: navigator.userAgent,
+                    status: 'FAILED',
+                    severity: 'WARNING'
+                },
+                {
+                    id: 5,
+                    timestamp: new Date(Date.now() - 18000000).toISOString(),
+                    userId: 'admin',
+                    userName: 'Alex Admin',
+                    action: 'CHANGE_ROLE',
+                    resource: 'User Management',
+                    details: 'Changed role for hr1 from employee to hr',
+                    ipAddress: '192.168.1.100',
+                    userAgent: navigator.userAgent,
+                    status: 'SUCCESS',
+                    severity: 'CRITICAL'
+                },
+                {
+                    id: 6,
+                    timestamp: new Date(Date.now() - 21600000).toISOString(),
+                    userId: 'aaron',
+                    userName: 'Aaron Employee',
+                    action: 'LOGIN',
+                    resource: 'System',
+                    details: 'Failed login attempt with incorrect password',
+                    ipAddress: '192.168.1.102',
+                    userAgent: navigator.userAgent,
+                    status: 'FAILED',
+                    severity: 'WARNING'
+                },
+                {
+                    id: 7,
+                    timestamp: new Date(Date.now() - 25200000).toISOString(),
+                    userId: 'hr1',
+                    userName: 'Harper HR',
+                    action: 'VIEW_SENSITIVE_DATA',
+                    resource: 'Employee Data',
+                    details: 'Viewed sensitive employee data for 5 employees',
+                    ipAddress: '192.168.1.101',
+                    userAgent: navigator.userAgent,
+                    status: 'SUCCESS',
+                    severity: 'INFO'
+                },
+                {
+                    id: 8,
+                    timestamp: new Date(Date.now() - 28800000).toISOString(),
+                    userId: 'admin',
+                    userName: 'Alex Admin',
+                    action: 'EXPORT_DATA',
+                    resource: 'Reports',
+                    details: 'Exported payroll data for compliance review',
+                    ipAddress: '192.168.1.100',
+                    userAgent: navigator.userAgent,
+                    status: 'SUCCESS',
+                    severity: 'INFO'
+                }
+            ];
+            localStorage.setItem('auditLogs', JSON.stringify(demoLogs));
+        }
+    }
+    
+    function loadAuditSummary() {
+        const logs = JSON.parse(localStorage.getItem('auditLogs') || '[]');
+        const now = new Date();
+        const last24Hours = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+        const last7Days = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        
+        const recentLogs = logs.filter(log => new Date(log.timestamp) >= last24Hours);
+        const weeklyLogs = logs.filter(log => new Date(log.timestamp) >= last7Days);
+        
+        const failedLogins = recentLogs.filter(log => log.action === 'LOGIN' && log.status === 'FAILED').length;
+        const criticalActions = recentLogs.filter(log => log.severity === 'CRITICAL').length;
+        const uniqueUsers = new Set(recentLogs.map(log => log.userId)).size;
+        
+        document.getElementById('totalEvents24h').textContent = recentLogs.length;
+        document.getElementById('failedLogins').textContent = failedLogins;
+        document.getElementById('criticalActions').textContent = criticalActions;
+        document.getElementById('activeUsers').textContent = uniqueUsers;
+        
+        // Update charts
+        updateActivityChart(weeklyLogs);
+        updateSeverityChart(recentLogs);
+    }
+    
+    function updateActivityChart(logs) {
+        const ctx = document.getElementById('activityChart');
+        if (!ctx) return;
+        
+        const last7Days = Array.from({length: 7}, (_, i) => {
+            const date = new Date();
+            date.setDate(date.getDate() - i);
+            return date.toISOString().split('T')[0];
+        }).reverse();
+        
+        const activityData = last7Days.map(date => {
+            return logs.filter(log => log.timestamp.startsWith(date)).length;
+        });
+        
+        new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: last7Days.map(date => new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })),
+                datasets: [{
+                    label: 'Audit Events',
+                    data: activityData,
+                    borderColor: 'rgb(37, 99, 235)',
+                    backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+    }
+    
+    function updateSeverityChart(logs) {
+        const ctx = document.getElementById('severityChart');
+        if (!ctx) return;
+        
+        const severityCounts = {
+            INFO: logs.filter(log => log.severity === 'INFO').length,
+            WARNING: logs.filter(log => log.severity === 'WARNING').length,
+            CRITICAL: logs.filter(log => log.severity === 'CRITICAL').length
+        };
+        
+        new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: Object.keys(severityCounts),
+                datasets: [{
+                    data: Object.values(severityCounts),
+                    backgroundColor: [
+                        'rgb(34, 197, 94)',
+                        'rgb(245, 158, 11)',
+                        'rgb(239, 68, 68)'
+                    ]
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        position: 'bottom'
+                    }
+                }
+            }
+        });
+    }
+    
+    function loadAuditLogs() {
+        const logs = JSON.parse(localStorage.getItem('auditLogs') || '[]');
+        displayAuditLogs(logs);
+    }
+    
+    function displayAuditLogs(logs) {
+        const tbody = document.getElementById('auditLogsBody');
+        
+        if (logs.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" class="no-data">No audit logs found</td></tr>';
+            return;
+        }
+        
+        tbody.innerHTML = logs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).map(log => `
+            <tr>
+                <td>${new Date(log.timestamp).toLocaleString()}</td>
+                <td>${log.userName}</td>
+                <td><span class="action-badge ${getActionClass(log.action)}">${formatAction(log.action)}</span></td>
+                <td>${log.resource}</td>
+                <td>${log.details}</td>
+                <td>${log.ipAddress}</td>
+                <td><span class="status-badge ${log.status === 'SUCCESS' ? 'success' : 'danger'}">${log.status}</span></td>
+                <td><span class="severity-badge ${getSeverityClass(log.severity)}">${log.severity}</span></td>
+            </tr>
+        `).join('');
+    }
+    
+    function formatAction(action) {
+        return action.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, l => l.toUpperCase());
+    }
+    
+    function getActionClass(action) {
+        const actionClasses = {
+            'LOGIN': 'primary',
+            'CREATE_EMPLOYEE': 'success',
+            'MODIFY_PAYROLL': 'warning',
+            'CHANGE_ROLE': 'danger',
+            'ACCESS_DENIED': 'danger',
+            'VIEW_SENSITIVE_DATA': 'info',
+            'EXPORT_DATA': 'info'
+        };
+        return actionClasses[action] || 'secondary';
+    }
+    
+    function getSeverityClass(severity) {
+        const severityClasses = {
+            'INFO': 'success',
+            'WARNING': 'warning',
+            'CRITICAL': 'danger'
+        };
+        return severityClasses[severity] || 'secondary';
+    }
+    
+    function filterLogs() {
+        const severityFilter = document.getElementById('severityFilter').value;
+        const actionFilter = document.getElementById('actionFilter').value;
+        const statusFilter = document.getElementById('statusFilter').value;
+        
+        let logs = JSON.parse(localStorage.getItem('auditLogs') || '[]');
+        
+        if (severityFilter !== 'all') {
+            logs = logs.filter(log => log.severity === severityFilter);
+        }
+        
+        if (actionFilter !== 'all') {
+            logs = logs.filter(log => log.action === actionFilter);
+        }
+        
+        if (statusFilter !== 'all') {
+            logs = logs.filter(log => log.status === statusFilter);
+        }
+        
+        displayAuditLogs(logs);
+    }
+    
+    function exportAuditLogs() {
+        const logs = JSON.parse(localStorage.getItem('auditLogs') || '[]');
+        const csvContent = generateCSV(logs);
+        
+        const blob = new Blob([csvContent], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `audit_logs_${new Date().toISOString().split('T')[0]}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        
+        // Log the export action
+        logAuditEvent('EXPORT_AUDIT_LOGS', 'Audit System', 'Exported audit logs for compliance review', 'SUCCESS', 'INFO');
+    }
+    
+    function generateCSV(logs) {
+        const headers = ['Timestamp', 'User', 'Action', 'Resource', 'Details', 'IP Address', 'Status', 'Severity'];
+        const rows = logs.map(log => [
+            new Date(log.timestamp).toLocaleString(),
+            log.userName,
+            formatAction(log.action),
+            log.resource,
+            `"${log.details}"`,
+            log.ipAddress,
+            log.status,
+            log.severity
+        ]);
+        
+        return [headers, ...rows].map(row => row.join(',')).join('\n');
+    }
+    
+    function logAuditEvent(action, resource, details, status, severity) {
+        const log = {
+            id: Date.now(),
+            timestamp: new Date().toISOString(),
+            userId: localStorage.getItem('username'),
+            userName: localStorage.getItem('fullName') || localStorage.getItem('username'),
+            action: action,
+            resource: resource,
+            details: details,
+            ipAddress: '192.168.1.100', // Demo IP
+            userAgent: navigator.userAgent,
+            status: status,
+            severity: severity
+        };
+        
+        const logs = JSON.parse(localStorage.getItem('auditLogs') || '[]');
+        logs.unshift(log);
+        localStorage.setItem('auditLogs', JSON.stringify(logs.slice(0, 1000))); // Keep last 1000 logs
+    }
+    
+    function clearOldLogs() {
+        if (!confirm('Clear audit logs older than 30 days? This action cannot be undone.')) return;
+        
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        const logs = JSON.parse(localStorage.getItem('auditLogs') || '[]');
+        const filteredLogs = logs.filter(log => new Date(log.timestamp) >= thirtyDaysAgo);
+        
+        localStorage.setItem('auditLogs', JSON.stringify(filteredLogs));
+        loadAuditData();
+        
+        logAuditEvent('CLEAR_AUDIT_LOGS', 'Audit System', 'Cleared audit logs older than 30 days', 'SUCCESS', 'CRITICAL');
+        alert('Old audit logs cleared successfully.');
+    }
+    
+    document.addEventListener('DOMContentLoaded', checkAuth);
+  </script>
+  <style>
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+    .summary-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      text-align: center;
+      box-shadow: var(--shadow);
+    }
+    .summary-card h4 {
+      margin: 0 0 10px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .summary-card .number {
+      font-size: 2rem;
+      font-weight: bold;
+      color: var(--primary);
+    }
+    .chart-container {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 30px;
+      box-shadow: var(--shadow);
+    }
+    .chart-grid {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 30px;
+    }
+    .filters {
+      display: flex;
+      gap: 15px;
+      margin-bottom: 20px;
+      align-items: center;
+    }
+    .filters select {
+      min-width: 150px;
+    }
+    .action-badge {
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: white;
+    }
+    .action-badge.primary { background: var(--primary); }
+    .action-badge.success { background: var(--success); }
+    .action-badge.warning { background: var(--warning); }
+    .action-badge.danger { background: var(--danger); }
+    .action-badge.info { background: #6b7280; }
+    .action-badge.secondary { background: #9ca3af; }
+    .severity-badge {
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: white;
+    }
+    .severity-badge.success { background: var(--success); }
+    .severity-badge.warning { background: var(--warning); }
+    .severity-badge.danger { background: var(--danger); }
+    .severity-badge.secondary { background: #9ca3af; }
+    .audit-table {
+      font-size: 0.85rem;
+    }
+    .audit-table td {
+      padding: 8px 12px;
+      vertical-align: top;
+    }
+    .audit-table .details {
+      max-width: 300px;
+      word-wrap: break-word;
+    }
+    @media (max-width: 768px) {
+      .chart-grid {
+        grid-template-columns: 1fr;
+      }
+      .filters {
+        flex-direction: column;
+        align-items: stretch;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="header-content">
+      <h1><i class="fas fa-shield-alt"></i> Audit & Compliance</h1>
+      <div class="user-info">
+        <span id="currentUser">Loading...</span>
+        <button onclick="logout()" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</button>
+      </div>
+    </div>
+  </header>
+  
+  <div class="container">
+    <nav class="sidebar">
+      <div class="sidebar-header"><i class="fas fa-user-tie"></i><span>Admin Portal</span></div>
+      <ul class="nav-links">
+        <li><a href="hr-dashboard.html"><i class="fas fa-users"></i><span>HR Dashboard</span></a></li>
+        <li><a href="employee-directory.html"><i class="fas fa-users"></i><span>Directory</span></a></li>
+        <li><a href="performance-reviews.html"><i class="fas fa-chart-line"></i><span>Performance</span></a></li>
+        <li class="active"><a href="audit-compliance.html"><i class="fas fa-shield-alt"></i><span>Audit</span></a></li>
+      </ul>
+    </nav>
+    
+    <main class="main-content">
+      <div class="page-header">
+        <h2><i class="fas fa-shield-alt"></i> Audit & Compliance</h2>
+        <p>Monitor system activity and ensure compliance with security policies.</p>
+      </div>
+      
+      <!-- Audit Summary -->
+      <div class="summary-grid">
+        <div class="summary-card">
+          <h4>Events (24h)</h4>
+          <div class="number" id="totalEvents24h">0</div>
+        </div>
+        <div class="summary-card">
+          <h4>Failed Logins</h4>
+          <div class="number" id="failedLogins">0</div>
+        </div>
+        <div class="summary-card">
+          <h4>Critical Actions</h4>
+          <div class="number" id="criticalActions">0</div>
+        </div>
+        <div class="summary-card">
+          <h4>Active Users</h4>
+          <div class="number" id="activeUsers">0</div>
+        </div>
+      </div>
+      
+      <!-- Charts -->
+      <div class="chart-grid">
+        <div class="chart-container">
+          <h3><i class="fas fa-chart-line"></i> Activity Trend (7 Days)</h3>
+          <canvas id="activityChart" width="400" height="200"></canvas>
+        </div>
+        <div class="chart-container">
+          <h3><i class="fas fa-chart-pie"></i> Severity Distribution</h3>
+          <canvas id="severityChart" width="300" height="200"></canvas>
+        </div>
+      </div>
+      
+      <!-- Audit Logs -->
+      <div class="content-section">
+        <div class="section-header">
+          <h3><i class="fas fa-list"></i> Audit Logs</h3>
+          <div>
+            <button onclick="exportAuditLogs()" class="secondary-btn">
+              <i class="fas fa-download"></i> Export
+            </button>
+            <button onclick="clearOldLogs()" class="danger">
+              <i class="fas fa-trash"></i> Clear Old
+            </button>
+          </div>
+        </div>
+        
+        <!-- Filters -->
+        <div class="filters">
+          <select id="severityFilter" onchange="filterLogs()">
+            <option value="all">All Severities</option>
+            <option value="INFO">Info</option>
+            <option value="WARNING">Warning</option>
+            <option value="CRITICAL">Critical</option>
+          </select>
+          <select id="actionFilter" onchange="filterLogs()">
+            <option value="all">All Actions</option>
+            <option value="LOGIN">Login</option>
+            <option value="CREATE_EMPLOYEE">Create Employee</option>
+            <option value="MODIFY_PAYROLL">Modify Payroll</option>
+            <option value="CHANGE_ROLE">Change Role</option>
+            <option value="ACCESS_DENIED">Access Denied</option>
+            <option value="VIEW_SENSITIVE_DATA">View Sensitive Data</option>
+            <option value="EXPORT_DATA">Export Data</option>
+          </select>
+          <select id="statusFilter" onchange="filterLogs()">
+            <option value="all">All Status</option>
+            <option value="SUCCESS">Success</option>
+            <option value="FAILED">Failed</option>
+          </select>
+        </div>
+        
+        <div class="table-container">
+          <table class="data-table audit-table">
+            <thead>
+              <tr>
+                <th>Timestamp</th>
+                <th>User</th>
+                <th>Action</th>
+                <th>Resource</th>
+                <th>Details</th>
+                <th>IP Address</th>
+                <th>Status</th>
+                <th>Severity</th>
+              </tr>
+            </thead>
+            <tbody id="auditLogsBody">
+              <!-- Data will be populated here -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+  
+  <footer><p>&copy; 2025 PayrollPro by Aaron | Audit & Compliance</p></footer>
+</body>
+</html>

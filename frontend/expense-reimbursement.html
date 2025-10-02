@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Expense Reimbursement - Payroll Management</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <script>
+    function logout(){ localStorage.removeItem('authToken'); localStorage.removeItem('userRole'); localStorage.removeItem('username'); localStorage.removeItem('fullName'); window.location.href='login.html'; }
+    function checkAuth(){ const t=localStorage.getItem('authToken'); const r=localStorage.getItem('userRole'); const u=localStorage.getItem('username'); if(!t||!r||!u){ window.location.href='login.html'; return; } document.getElementById('currentUser').innerHTML=`<span>${localStorage.getItem('fullName') || u}</span><span class="role-badge">${r.toUpperCase()}</span>`; document.body.classList.add('employee-theme'); loadExpenseData(); }
+    
+    function loadExpenseData() {
+        const username = localStorage.getItem('username');
+        const userRole = localStorage.getItem('userRole');
+        
+        loadExpenseSummary(username);
+        loadExpenseHistory(username);
+        
+        if (userRole === 'hr' || userRole === 'admin') {
+            document.getElementById('hrControls').style.display = 'block';
+            loadPendingApprovals();
+        }
+    }
+    
+    function loadExpenseSummary(username) {
+        const expenses = JSON.parse(localStorage.getItem(`expenses_${username}`) || '[]');
+        const currentYear = new Date().getFullYear();
+        
+        const yearExpenses = expenses.filter(expense => 
+            new Date(expense.date).getFullYear() === currentYear
+        );
+        
+        const totalAmount = yearExpenses.reduce((sum, expense) => sum + expense.amount, 0);
+        const pendingAmount = yearExpenses
+            .filter(expense => expense.status === 'Pending')
+            .reduce((sum, expense) => sum + expense.amount, 0);
+        const approvedAmount = yearExpenses
+            .filter(expense => expense.status === 'Approved')
+            .reduce((sum, expense) => sum + expense.amount, 0);
+        
+        document.getElementById('totalExpenses').textContent = `$${totalAmount.toFixed(2)}`;
+        document.getElementById('pendingAmount').textContent = `$${pendingAmount.toFixed(2)}`;
+        document.getElementById('approvedAmount').textContent = `$${approvedAmount.toFixed(2)}`;
+        document.getElementById('expenseCount').textContent = yearExpenses.length;
+    }
+    
+    function loadExpenseHistory(username) {
+        const expenses = JSON.parse(localStorage.getItem(`expenses_${username}`) || '[]');
+        const tbody = document.getElementById('expenseHistoryBody');
+        
+        if (expenses.length === 0) {
+            // Generate demo expenses
+            const demoExpenses = [
+                {
+                    id: 1,
+                    category: 'Travel',
+                    description: 'Business trip to client meeting',
+                    amount: 150.00,
+                    date: '2025-03-20',
+                    receipt: 'receipt_travel_001.pdf',
+                    status: 'Approved',
+                    submittedDate: '2025-03-21'
+                },
+                {
+                    id: 2,
+                    category: 'Meals',
+                    description: 'Team lunch meeting',
+                    amount: 45.50,
+                    date: '2025-03-18',
+                    receipt: 'receipt_meals_002.pdf',
+                    status: 'Pending',
+                    submittedDate: '2025-03-19'
+                },
+                {
+                    id: 3,
+                    category: 'Equipment',
+                    description: 'Software license renewal',
+                    amount: 299.00,
+                    date: '2025-03-15',
+                    receipt: 'receipt_equipment_003.pdf',
+                    status: 'Rejected',
+                    submittedDate: '2025-03-16'
+                }
+            ];
+            localStorage.setItem(`expenses_${username}`, JSON.stringify(demoExpenses));
+            displayExpenseHistory(demoExpenses);
+        } else {
+            displayExpenseHistory(expenses);
+        }
+    }
+    
+    function displayExpenseHistory(expenses) {
+        const tbody = document.getElementById('expenseHistoryBody');
+        
+        if (expenses.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" class="no-data">No expenses found</td></tr>';
+            return;
+        }
+        
+        tbody.innerHTML = expenses.sort((a, b) => new Date(b.submittedDate) - new Date(a.submittedDate)).map(expense => `
+            <tr>
+                <td>${expense.category}</td>
+                <td>${expense.description}</td>
+                <td>$${expense.amount.toFixed(2)}</td>
+                <td>${new Date(expense.date).toLocaleDateString()}</td>
+                <td><span class="status-badge ${getStatusClass(expense.status)}">${expense.status}</span></td>
+                <td>
+                    <button class="secondary-btn small" onclick="viewExpenseDetails(${expense.id})">
+                        <i class="fas fa-eye"></i> View
+                    </button>
+                    ${expense.status === 'Pending' ? `<button class="danger small" onclick="deleteExpense(${expense.id})"><i class="fas fa-trash"></i> Delete</button>` : ''}
+                </td>
+            </tr>
+        `).join('');
+    }
+    
+    function loadPendingApprovals() {
+        const allExpenses = [];
+        const employees = JSON.parse(localStorage.getItem('employeeDirectory') || '[]');
+        
+        employees.forEach(employee => {
+            const expenses = JSON.parse(localStorage.getItem(`expenses_${employee.username}`) || '[]');
+            expenses.forEach(expense => {
+                if (expense.status === 'Pending') {
+                    allExpenses.push({
+                        ...expense,
+                        employeeName: employee.name,
+                        employeeId: employee.employeeId
+                    });
+                }
+            });
+        });
+        
+        displayPendingApprovals(allExpenses);
+    }
+    
+    function displayPendingApprovals(expenses) {
+        const tbody = document.getElementById('pendingApprovalsBody');
+        
+        if (expenses.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" class="no-data">No pending approvals</td></tr>';
+            return;
+        }
+        
+        tbody.innerHTML = expenses.sort((a, b) => new Date(b.submittedDate) - new Date(a.submittedDate)).map(expense => `
+            <tr>
+                <td>${expense.employeeName}</td>
+                <td>${expense.category}</td>
+                <td>${expense.description}</td>
+                <td>$${expense.amount.toFixed(2)}</td>
+                <td>${new Date(expense.date).toLocaleDateString()}</td>
+                <td>${new Date(expense.submittedDate).toLocaleDateString()}</td>
+                <td>
+                    <button class="primary-btn small" onclick="approveExpense('${expense.employeeId}', ${expense.id})">
+                        <i class="fas fa-check"></i> Approve
+                    </button>
+                    <button class="danger small" onclick="rejectExpense('${expense.employeeId}', ${expense.id})">
+                        <i class="fas fa-times"></i> Reject
+                    </button>
+                    <button class="secondary-btn small" onclick="viewExpenseDetails(${expense.id}, '${expense.employeeId}')">
+                        <i class="fas fa-eye"></i> View
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+    }
+    
+    function getStatusClass(status) {
+        switch(status) {
+            case 'Approved': return 'success';
+            case 'Pending': return 'warning';
+            case 'Rejected': return 'danger';
+            default: return 'warning';
+        }
+    }
+    
+    function openNewExpenseModal() {
+        document.getElementById('newExpenseModal').style.display = 'block';
+    }
+    
+    function closeNewExpenseModal() {
+        document.getElementById('newExpenseModal').style.display = 'none';
+        document.getElementById('newExpenseForm').reset();
+        document.getElementById('receiptPreview').style.display = 'none';
+        document.getElementById('receiptPreview').src = '';
+    }
+    
+    function submitExpense(e) {
+        e.preventDefault();
+        
+        const formData = new FormData(e.target);
+        const receiptFile = document.getElementById('receipt').files[0];
+        
+        if (!receiptFile) {
+            alert('Please attach a receipt');
+            return;
+        }
+        
+        const expense = {
+            id: Date.now(),
+            category: formData.get('category'),
+            description: formData.get('description'),
+            amount: parseFloat(formData.get('amount')),
+            date: formData.get('date'),
+            receipt: receiptFile.name,
+            status: 'Pending',
+            submittedDate: new Date().toISOString().split('T')[0],
+            receiptData: receiptFile.name // In real app, would store file data
+        };
+        
+        const username = localStorage.getItem('username');
+        const expenses = JSON.parse(localStorage.getItem(`expenses_${username}`) || '[]');
+        expenses.unshift(expense);
+        localStorage.setItem(`expenses_${username}`, JSON.stringify(expenses));
+        
+        closeNewExpenseModal();
+        loadExpenseData();
+        
+        // Add activity
+        addActivity(`Submitted expense claim: $${expense.amount.toFixed(2)}`, 'Success');
+        
+        alert('Expense claim submitted successfully!');
+    }
+    
+    function approveExpense(employeeId, expenseId) {
+        if (!confirm('Approve this expense claim?')) return;
+        
+        const employees = JSON.parse(localStorage.getItem('employeeDirectory') || '[]');
+        const employee = employees.find(emp => emp.employeeId === employeeId);
+        
+        if (!employee) return;
+        
+        const expenses = JSON.parse(localStorage.getItem(`expenses_${employee.username}`) || '[]');
+        const expense = expenses.find(exp => exp.id === expenseId);
+        
+        if (expense) {
+            expense.status = 'Approved';
+            expense.approvedDate = new Date().toISOString().split('T')[0];
+            expense.approvedBy = localStorage.getItem('username');
+            localStorage.setItem(`expenses_${employee.username}`, JSON.stringify(expenses));
+            
+            loadExpenseData();
+            addActivity(`Approved expense claim: $${expense.amount.toFixed(2)} for ${employee.name}`, 'Success');
+        }
+    }
+    
+    function rejectExpense(employeeId, expenseId) {
+        const reason = prompt('Reason for rejection:');
+        if (!reason) return;
+        
+        const employees = JSON.parse(localStorage.getItem('employeeDirectory') || '[]');
+        const employee = employees.find(emp => emp.employeeId === employeeId);
+        
+        if (!employee) return;
+        
+        const expenses = JSON.parse(localStorage.getItem(`expenses_${employee.username}`) || '[]');
+        const expense = expenses.find(exp => exp.id === expenseId);
+        
+        if (expense) {
+            expense.status = 'Rejected';
+            expense.rejectedDate = new Date().toISOString().split('T')[0];
+            expense.rejectedBy = localStorage.getItem('username');
+            expense.rejectionReason = reason;
+            localStorage.setItem(`expenses_${employee.username}`, JSON.stringify(expenses));
+            
+            loadExpenseData();
+            addActivity(`Rejected expense claim: $${expense.amount.toFixed(2)} for ${employee.name}`, 'Success');
+        }
+    }
+    
+    function viewExpenseDetails(expenseId, employeeId = null) {
+        let expense, employeeName;
+        
+        if (employeeId) {
+            // HR viewing employee expense
+            const employees = JSON.parse(localStorage.getItem('employeeDirectory') || '[]');
+            const emp = employees.find(e => e.employeeId === employeeId);
+            if (!emp) return;
+            
+            const expenses = JSON.parse(localStorage.getItem(`expenses_${emp.username}`) || '[]');
+            expense = expenses.find(e => e.id === expenseId);
+            employeeName = emp.name;
+        } else {
+            // Employee viewing own expense
+            const username = localStorage.getItem('username');
+            const expenses = JSON.parse(localStorage.getItem(`expenses_${username}`) || '[]');
+            expense = expenses.find(e => e.id === expenseId);
+            employeeName = localStorage.getItem('fullName') || localStorage.getItem('username');
+        }
+        
+        if (!expense) return;
+        
+        document.getElementById('detailEmployee').textContent = employeeName;
+        document.getElementById('detailCategory').textContent = expense.category;
+        document.getElementById('detailDescription').textContent = expense.description;
+        document.getElementById('detailAmount').textContent = `$${expense.amount.toFixed(2)}`;
+        document.getElementById('detailDate').textContent = new Date(expense.date).toLocaleDateString();
+        document.getElementById('detailStatus').textContent = expense.status;
+        document.getElementById('detailReceipt').textContent = expense.receipt;
+        document.getElementById('detailSubmitted').textContent = new Date(expense.submittedDate).toLocaleDateString();
+        
+        if (expense.approvedDate) {
+            document.getElementById('detailApproved').textContent = new Date(expense.approvedDate).toLocaleDateString();
+        }
+        if (expense.rejectedDate) {
+            document.getElementById('detailRejected').textContent = new Date(expense.rejectedDate).toLocaleDateString();
+            document.getElementById('detailRejectionReason').textContent = expense.rejectionReason || 'No reason provided';
+        }
+        
+        document.getElementById('expenseDetailsModal').style.display = 'block';
+    }
+    
+    function closeExpenseDetailsModal() {
+        document.getElementById('expenseDetailsModal').style.display = 'none';
+    }
+    
+    function deleteExpense(expenseId) {
+        if (!confirm('Delete this expense claim?')) return;
+        
+        const username = localStorage.getItem('username');
+        const expenses = JSON.parse(localStorage.getItem(`expenses_${username}`) || '[]');
+        const filtered = expenses.filter(exp => exp.id !== expenseId);
+        localStorage.setItem(`expenses_${username}`, JSON.stringify(filtered));
+        
+        loadExpenseData();
+        addActivity('Deleted expense claim', 'Success');
+    }
+    
+    function previewReceipt() {
+        const file = document.getElementById('receipt').files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                document.getElementById('receiptPreview').src = e.target.result;
+                document.getElementById('receiptPreview').style.display = 'block';
+            };
+            reader.readAsDataURL(file);
+        }
+    }
+    
+    function addActivity(action, status) {
+        const username = localStorage.getItem('username');
+        const activity = {
+            date: new Date().toLocaleDateString(),
+            action: action,
+            status: status
+        };
+        
+        const activities = JSON.parse(localStorage.getItem(`activities_${username}`) || '[]');
+        activities.unshift(activity);
+        localStorage.setItem(`activities_${username}`, JSON.stringify(activities.slice(0, 50)));
+    }
+    
+    // Close modals when clicking outside
+    window.onclick = function(event) {
+        const modals = [
+            document.getElementById('newExpenseModal'),
+            document.getElementById('expenseDetailsModal')
+        ];
+        modals.forEach(modal => {
+            if (event.target === modal) {
+                modal.style.display = 'none';
+            }
+        });
+    }
+    
+    document.addEventListener('DOMContentLoaded', checkAuth);
+  </script>
+  <style>
+    .summary-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+    .summary-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      text-align: center;
+      box-shadow: var(--shadow);
+    }
+    .summary-card h4 {
+      margin: 0 0 10px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .summary-card .amount {
+      font-size: 2rem;
+      font-weight: bold;
+      color: var(--primary);
+    }
+    .summary-card .count {
+      font-size: 1.2rem;
+      font-weight: bold;
+      color: var(--primary);
+    }
+    .receipt-preview {
+      max-width: 200px;
+      max-height: 200px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-top: 10px;
+    }
+    .category-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 8px;
+      border-radius: 12px;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+    .category-badge.travel { background: #e3f2fd; color: #1976d2; }
+    .category-badge.meals { background: #fff3e0; color: #f57c00; }
+    .category-badge.equipment { background: #e8f5e8; color: #2e7d32; }
+    .category-badge.other { background: #f3e5f5; color: #7b1fa2; }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="header-content">
+      <h1><i class="fas fa-receipt"></i> Expense Reimbursement</h1>
+      <div class="user-info">
+        <span id="currentUser">Loading...</span>
+        <button onclick="logout()" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</button>
+      </div>
+    </div>
+  </header>
+  
+  <div class="container">
+    <nav class="sidebar">
+      <div class="sidebar-header"><i class="fas fa-user-tie"></i><span>Employee Portal</span></div>
+      <ul class="nav-links">
+        <li><a href="employee-dashboard.html"><i class="fas fa-tachometer-alt"></i><span>Dashboard</span></a></li>
+        <li><a href="employee-reports.html"><i class="fas fa-file-alt"></i><span>My Reports</span></a></li>
+        <li><a href="employee-profile.html"><i class="fas fa-user-cog"></i><span>Profile</span></a></li>
+        <li><a href="time-tracking.html"><i class="fas fa-clock"></i><span>Time Tracking</span></a></li>
+        <li><a href="employee-directory.html"><i class="fas fa-users"></i><span>Directory</span></a></li>
+        <li><a href="leave-management.html"><i class="fas fa-calendar-alt"></i><span>Leave</span></a></li>
+        <li><a href="shift-scheduling.html"><i class="fas fa-calendar-alt"></i><span>Shifts</span></a></li>
+        <li class="active"><a href="expense-reimbursement.html"><i class="fas fa-receipt"></i><span>Expenses</span></a></li>
+      </ul>
+    </nav>
+    
+    <main class="main-content">
+      <div class="page-header">
+        <h2><i class="fas fa-receipt"></i> Expense Reimbursement</h2>
+        <p>Submit and track your expense claims.</p>
+      </div>
+      
+      <!-- Expense Summary -->
+      <div class="summary-cards">
+        <div class="summary-card">
+          <h4>Total Expenses (2025)</h4>
+          <div class="amount" id="totalExpenses">$0.00</div>
+        </div>
+        <div class="summary-card">
+          <h4>Pending Claims</h4>
+          <div class="amount" id="pendingAmount">$0.00</div>
+        </div>
+        <div class="summary-card">
+          <h4>Approved Claims</h4>
+          <div class="amount" id="approvedAmount">$0.00</div>
+        </div>
+        <div class="summary-card">
+          <h4>Total Claims</h4>
+          <div class="count" id="expenseCount">0</div>
+        </div>
+      </div>
+      
+      <!-- New Expense Button -->
+      <div class="content-section">
+        <div class="section-header">
+          <h3><i class="fas fa-plus"></i> Expense Claims</h3>
+          <button onclick="openNewExpenseModal()" class="primary-btn">
+            <i class="fas fa-plus"></i> New Claim
+          </button>
+        </div>
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Category</th>
+                <th>Description</th>
+                <th>Amount</th>
+                <th>Date</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="expenseHistoryBody">
+              <!-- Data will be populated here -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+      
+      <!-- HR Controls (only visible for HR/Admin) -->
+      <div id="hrControls" class="content-section" style="display: none;">
+        <div class="section-header">
+          <h3><i class="fas fa-user-check"></i> Pending Approvals</h3>
+        </div>
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Employee</th>
+                <th>Category</th>
+                <th>Description</th>
+                <th>Amount</th>
+                <th>Expense Date</th>
+                <th>Submitted</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="pendingApprovalsBody">
+              <!-- Data will be populated here -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+  
+  <footer><p>&copy; 2025 PayrollPro by Aaron | Expense Reimbursement</p></footer>
+  
+  <!-- New Expense Modal -->
+  <div id="newExpenseModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3><i class="fas fa-plus"></i> New Expense Claim</h3>
+        <span class="close" onclick="closeNewExpenseModal()">&times;</span>
+      </div>
+      <form id="newExpenseForm" onsubmit="submitExpense(event)">
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="category">Category</label>
+            <select name="category" required>
+              <option value="">Select category...</option>
+              <option value="Travel">Travel</option>
+              <option value="Meals">Meals & Entertainment</option>
+              <option value="Equipment">Equipment & Supplies</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="amount">Amount ($)</label>
+            <input type="number" step="0.01" min="0" name="amount" required>
+          </div>
+          <div class="form-group">
+            <label for="date">Expense Date</label>
+            <input type="date" name="date" required>
+          </div>
+          <div class="form-group">
+            <label for="description">Description</label>
+            <textarea name="description" rows="3" placeholder="Describe the expense..." required></textarea>
+          </div>
+          <div class="form-group">
+            <label for="receipt">Receipt</label>
+            <input type="file" id="receipt" accept=".pdf,.jpg,.jpeg,.png" onchange="previewReceipt()" required>
+            <img id="receiptPreview" class="receipt-preview" style="display: none;">
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" onclick="closeNewExpenseModal()" class="secondary-btn">Cancel</button>
+          <button type="submit" class="primary-btn">Submit Claim</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  
+  <!-- Expense Details Modal -->
+  <div id="expenseDetailsModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3><i class="fas fa-eye"></i> Expense Details</h3>
+        <span class="close" onclick="closeExpenseDetailsModal()">&times;</span>
+      </div>
+      <div class="modal-grid">
+        <div class="modal-field">
+          <label>Employee</label>
+          <span id="detailEmployee">-</span>
+        </div>
+        <div class="modal-field">
+          <label>Category</label>
+          <span id="detailCategory">-</span>
+        </div>
+        <div class="modal-field">
+          <label>Amount</label>
+          <span id="detailAmount">-</span>
+        </div>
+        <div class="modal-field">
+          <label>Expense Date</label>
+          <span id="detailDate">-</span>
+        </div>
+        <div class="modal-field">
+          <label>Status</label>
+          <span id="detailStatus">-</span>
+        </div>
+        <div class="modal-field">
+          <label>Receipt</label>
+          <span id="detailReceipt">-</span>
+        </div>
+        <div class="modal-field">
+          <label>Submitted Date</label>
+          <span id="detailSubmitted">-</span>
+        </div>
+        <div class="modal-field">
+          <label>Approved Date</label>
+          <span id="detailApproved">-</span>
+        </div>
+        <div class="modal-field">
+          <label>Rejected Date</label>
+          <span id="detailRejected">-</span>
+        </div>
+      </div>
+      <div class="modal-field">
+        <label>Description</label>
+        <span id="detailDescription">-</span>
+      </div>
+      <div class="modal-field" id="rejectionReasonField" style="display: none;">
+        <label>Rejection Reason</label>
+        <span id="detailRejectionReason">-</span>
+      </div>
+      <div class="modal-actions">
+        <button onclick="closeExpenseDetailsModal()" class="primary-btn">Close</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

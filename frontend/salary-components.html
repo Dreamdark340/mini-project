@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Salary Components - Payroll Management</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    function logout(){ localStorage.removeItem('authToken'); localStorage.removeItem('userRole'); localStorage.removeItem('username'); localStorage.removeItem('fullName'); window.location.href='login.html'; }
+    function checkAuth(){ const t=localStorage.getItem('authToken'); const r=localStorage.getItem('userRole'); const u=localStorage.getItem('username'); if(!t||!r||!u){ window.location.href='login.html'; return; } document.getElementById('currentUser').innerHTML=`<span>${localStorage.getItem('fullName') || u}</span><span class="role-badge">${r.toUpperCase()}</span>`; document.body.classList.add('employee-theme'); loadSalaryComponents(); }
+    
+    let salaryChart = null;
+    let currentEmployee = null;
+    
+    function loadSalaryComponents() {
+        loadEmployeeList();
+        generateSalaryTemplates();
+    }
+    
+    function loadEmployeeList() {
+        const employees = JSON.parse(localStorage.getItem('employeeDirectory') || '[]');
+        const select = document.getElementById('employeeSelect');
+        select.innerHTML = '<option value="">Select Employee...</option>' +
+            employees.map(emp => `<option value="${emp.employeeId}">${emp.name} (${emp.employeeId})</option>`).join('');
+    }
+    
+    function generateSalaryTemplates() {
+        const templates = JSON.parse(localStorage.getItem('salaryTemplates') || '[]');
+        if (templates.length === 0) {
+            const demoTemplates = [
+                {
+                    id: 'template_1',
+                    name: 'Standard US Template',
+                    region: 'US',
+                    components: [
+                        { type: 'basic', name: 'Basic Salary', percentage: 60, amount: 0, taxable: true, mandatory: true },
+                        { type: 'hra', name: 'Housing Allowance', percentage: 20, amount: 0, taxable: true, mandatory: false },
+                        { type: 'lta', name: 'Leave Travel Allowance', percentage: 10, amount: 0, taxable: false, mandatory: false },
+                        { type: 'medical', name: 'Medical Allowance', percentage: 5, amount: 0, taxable: false, mandatory: false },
+                        { type: 'transport', name: 'Transport Allowance', percentage: 5, amount: 0, taxable: true, mandatory: false }
+                    ]
+                },
+                {
+                    id: 'template_2',
+                    name: 'India CTC Template',
+                    region: 'India',
+                    components: [
+                        { type: 'basic', name: 'Basic Salary', percentage: 40, amount: 0, taxable: true, mandatory: true },
+                        { type: 'hra', name: 'HRA', percentage: 30, amount: 0, taxable: true, mandatory: true },
+                        { type: 'special', name: 'Special Allowance', percentage: 20, amount: 0, taxable: true, mandatory: false },
+                        { type: 'lta', name: 'LTA', percentage: 5, amount: 0, taxable: false, mandatory: false },
+                        { type: 'medical', name: 'Medical Reimbursement', percentage: 3, amount: 0, taxable: false, mandatory: false },
+                        { type: 'transport', name: 'Transport Allowance', percentage: 2, amount: 0, taxable: true, mandatory: false }
+                    ]
+                }
+            ];
+            localStorage.setItem('salaryTemplates', JSON.stringify(demoTemplates));
+        }
+        
+        // Generate employee salary data
+        generateEmployeeSalaryData();
+    }
+    
+    function generateEmployeeSalaryData() {
+        const employees = JSON.parse(localStorage.getItem('employeeDirectory') || '[]');
+        const salaryData = JSON.parse(localStorage.getItem('employeeSalaryData') || '[]');
+        
+        if (salaryData.length === 0) {
+            const demoData = employees.map((emp, index) => {
+                const ctc = 50000 + (index * 10000);
+                return {
+                    employeeId: emp.employeeId,
+                    ctc: ctc,
+                    template: index % 2 === 0 ? 'template_1' : 'template_2',
+                    components: calculateComponentsFromCTC(ctc, index % 2 === 0 ? 'US' : 'India'),
+                    lastUpdated: new Date().toISOString(),
+                    updatedBy: 'hr1'
+                };
+            });
+            localStorage.setItem('employeeSalaryData', JSON.stringify(demoData));
+        }
+    }
+    
+    function calculateComponentsFromCTC(ctc, region) {
+        const templates = JSON.parse(localStorage.getItem('salaryTemplates') || '[]');
+        const template = templates.find(t => t.region === region);
+        
+        if (!template) return [];
+        
+        return template.components.map(comp => ({
+            ...comp,
+            amount: (ctc * comp.percentage) / 100
+        }));
+    }
+    
+    function loadEmployeeSalary() {
+        const employeeId = document.getElementById('employeeSelect').value;
+        if (!employeeId) return;
+        
+        const salaryData = JSON.parse(localStorage.getItem('employeeSalaryData') || '[]');
+        const employeeData = salaryData.find(d => d.employeeId === employeeId);
+        
+        if (employeeData) {
+            currentEmployee = employeeData;
+            document.getElementById('ctcAmount').value = employeeData.ctc;
+            document.getElementById('templateSelect').value = employeeData.template;
+            
+            displaySalaryComponents(employeeData.components);
+            createSalaryChart(employeeData.components);
+            calculateTotals(employeeData.components);
+        }
+    }
+    
+    function displaySalaryComponents(components) {
+        const container = document.getElementById('componentsContainer');
+        
+        container.innerHTML = components.map((comp, index) => `
+            <div class="component-row">
+                <div class="component-info">
+                    <div class="component-name">
+                        <span class="component-type ${comp.type}">${comp.type.toUpperCase()}</span>
+                        <span class="component-label">${comp.name}</span>
+                        ${comp.mandatory ? '<span class="mandatory-badge">Mandatory</span>' : ''}
+                    </div>
+                    <div class="component-details">
+                        <span class="taxable-status ${comp.taxable ? 'taxable' : 'non-taxable'}">
+                            ${comp.taxable ? 'Taxable' : 'Non-taxable'}
+                        </span>
+                    </div>
+                </div>
+                <div class="component-inputs">
+                    <div class="input-group">
+                        <label>Percentage</label>
+                        <input type="number" step="0.01" min="0" max="100" 
+                               value="${comp.percentage}" 
+                               onchange="updateComponent(${index}, 'percentage', this.value)">
+                    </div>
+                    <div class="input-group">
+                        <label>Amount ($)</label>
+                        <input type="number" step="0.01" min="0" 
+                               value="${comp.amount.toFixed(2)}" 
+                               onchange="updateComponent(${index}, 'amount', this.value)">
+                    </div>
+                    <div class="component-actions">
+                        ${!comp.mandatory ? `<button class="danger small" onclick="removeComponent(${index})"><i class="fas fa-trash"></i></button>` : ''}
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+    
+    function updateComponent(index, field, value) {
+        if (!currentEmployee) return;
+        
+        const numValue = parseFloat(value);
+        if (field === 'percentage') {
+            currentEmployee.components[index].percentage = numValue;
+            // Recalculate amount based on percentage
+            const ctc = parseFloat(document.getElementById('ctcAmount').value) || 0;
+            currentEmployee.components[index].amount = (ctc * numValue) / 100;
+        } else if (field === 'amount') {
+            currentEmployee.components[index].amount = numValue;
+            // Recalculate percentage based on amount
+            const ctc = parseFloat(document.getElementById('ctcAmount').value) || 0;
+            currentEmployee.components[index].percentage = ctc > 0 ? (numValue / ctc) * 100 : 0;
+        }
+        
+        displaySalaryComponents(currentEmployee.components);
+        createSalaryChart(currentEmployee.components);
+        calculateTotals(currentEmployee.components);
+    }
+    
+    function removeComponent(index) {
+        if (!currentEmployee || currentEmployee.components[index].mandatory) return;
+        
+        currentEmployee.components.splice(index, 1);
+        displaySalaryComponents(currentEmployee.components);
+        createSalaryChart(currentEmployee.components);
+        calculateTotals(currentEmployee.components);
+    }
+    
+    function addNewComponent() {
+        const name = prompt('Component name:');
+        const type = prompt('Component type (basic, hra, lta, medical, transport, special, other):');
+        const percentage = parseFloat(prompt('Percentage:') || '0');
+        const taxable = confirm('Is this component taxable?');
+        
+        if (!name || !type) return;
+        
+        const ctc = parseFloat(document.getElementById('ctcAmount').value) || 0;
+        const amount = (ctc * percentage) / 100;
+        
+        const newComponent = {
+            type: type,
+            name: name,
+            percentage: percentage,
+            amount: amount,
+            taxable: taxable,
+            mandatory: false
+        };
+        
+        if (!currentEmployee) {
+            currentEmployee = {
+                employeeId: document.getElementById('employeeSelect').value,
+                ctc: ctc,
+                template: document.getElementById('templateSelect').value,
+                components: [newComponent],
+                lastUpdated: new Date().toISOString(),
+                updatedBy: localStorage.getItem('username')
+            };
+        } else {
+            currentEmployee.components.push(newComponent);
+        }
+        
+        displaySalaryComponents(currentEmployee.components);
+        createSalaryChart(currentEmployee.components);
+        calculateTotals(currentEmployee.components);
+    }
+    
+    function createSalaryChart(components) {
+        const ctx = document.getElementById('salaryChart');
+        if (!ctx) return;
+        
+        if (salaryChart) {
+            salaryChart.destroy();
+        }
+        
+        const labels = components.map(comp => comp.name);
+        const amounts = components.map(comp => comp.amount);
+        const colors = components.map(comp => getComponentColor(comp.type));
+        
+        salaryChart = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: labels,
+                datasets: [{
+                    data: amounts,
+                    backgroundColor: colors,
+                    borderWidth: 2,
+                    borderColor: '#ffffff'
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        position: 'bottom'
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const component = components[context.dataIndex];
+                                return `${context.label}: $${context.parsed.toFixed(2)} (${component.percentage.toFixed(1)}%)`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+    
+    function getComponentColor(type) {
+        const colors = {
+            'basic': '#3b82f6',
+            'hra': '#10b981',
+            'lta': '#f59e0b',
+            'medical': '#ef4444',
+            'transport': '#8b5cf6',
+            'special': '#06b6d4',
+            'other': '#84cc16'
+        };
+        return colors[type] || '#9ca3af';
+    }
+    
+    function calculateTotals(components) {
+        const totalAmount = components.reduce((sum, comp) => sum + comp.amount, 0);
+        const taxableAmount = components.filter(comp => comp.taxable).reduce((sum, comp) => sum + comp.amount, 0);
+        const nonTaxableAmount = components.filter(comp => !comp.taxable).reduce((sum, comp) => sum + comp.amount, 0);
+        
+        document.getElementById('totalAmount').textContent = `$${totalAmount.toFixed(2)}`;
+        document.getElementById('taxableAmount').textContent = `$${taxableAmount.toFixed(2)}`;
+        document.getElementById('nonTaxableAmount').textContent = `$${nonTaxableAmount.toFixed(2)}`;
+        
+        // Update CTC if needed
+        const ctcInput = document.getElementById('ctcAmount');
+        if (Math.abs(parseFloat(ctcInput.value) - totalAmount) > 1) {
+            ctcInput.value = totalAmount.toFixed(2);
+        }
+    }
+    
+    function saveSalaryStructure() {
+        if (!currentEmployee) {
+            alert('Please select an employee first');
+            return;
+        }
+        
+        const ctc = parseFloat(document.getElementById('ctcAmount').value) || 0;
+        currentEmployee.ctc = ctc;
+        currentEmployee.lastUpdated = new Date().toISOString();
+        currentEmployee.updatedBy = localStorage.getItem('username');
+        
+        const salaryData = JSON.parse(localStorage.getItem('employeeSalaryData') || '[]');
+        const existingIndex = salaryData.findIndex(d => d.employeeId === currentEmployee.employeeId);
+        
+        if (existingIndex >= 0) {
+            salaryData[existingIndex] = currentEmployee;
+        } else {
+            salaryData.push(currentEmployee);
+        }
+        
+        localStorage.setItem('employeeSalaryData', JSON.stringify(salaryData));
+        alert('Salary structure saved successfully!');
+    }
+    
+    function loadTemplate() {
+        const templateId = document.getElementById('templateSelect').value;
+        if (!templateId || !currentEmployee) return;
+        
+        const templates = JSON.parse(localStorage.getItem('salaryTemplates') || '[]');
+        const template = templates.find(t => t.id === templateId);
+        
+        if (template) {
+            const ctc = parseFloat(document.getElementById('ctcAmount').value) || 0;
+            currentEmployee.components = template.components.map(comp => ({
+                ...comp,
+                amount: (ctc * comp.percentage) / 100
+            }));
+            
+            displaySalaryComponents(currentEmployee.components);
+            createSalaryChart(currentEmployee.components);
+            calculateTotals(currentEmployee.components);
+        }
+    }
+    
+    function exportSalaryBreakdown() {
+        if (!currentEmployee) {
+            alert('Please select an employee first');
+            return;
+        }
+        
+        const breakdown = {
+            employeeId: currentEmployee.employeeId,
+            ctc: currentEmployee.ctc,
+            components: currentEmployee.components,
+            totalAmount: currentEmployee.components.reduce((sum, comp) => sum + comp.amount, 0),
+            taxableAmount: currentEmployee.components.filter(comp => comp.taxable).reduce((sum, comp) => sum + comp.amount, 0),
+            nonTaxableAmount: currentEmployee.components.filter(comp => !comp.taxable).reduce((sum, comp) => sum + comp.amount, 0),
+            exportedAt: new Date().toISOString(),
+            exportedBy: localStorage.getItem('username')
+        };
+        
+        const dataStr = JSON.stringify(breakdown, null, 2);
+        const blob = new Blob([dataStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `salary_breakdown_${currentEmployee.employeeId}_${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    }
+    
+    document.addEventListener('DOMContentLoaded', checkAuth);
+  </script>
+  <style>
+    .salary-grid {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 30px;
+      margin-bottom: 30px;
+    }
+    .components-section {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      box-shadow: var(--shadow);
+    }
+    .totals-section {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      box-shadow: var(--shadow);
+    }
+    .component-row {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      padding: 15px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-bottom: 15px;
+      background: #f8fafc;
+    }
+    .component-info {
+      flex: 1;
+    }
+    .component-name {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 5px;
+    }
+    .component-type {
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: white;
+    }
+    .component-type.basic { background: #3b82f6; }
+    .component-type.hra { background: #10b981; }
+    .component-type.lta { background: #f59e0b; }
+    .component-type.medical { background: #ef4444; }
+    .component-type.transport { background: #8b5cf6; }
+    .component-type.special { background: #06b6d4; }
+    .component-type.other { background: #84cc16; }
+    .component-label {
+      font-weight: 600;
+      color: var(--text);
+    }
+    .mandatory-badge {
+      background: #fef3c7;
+      color: #92400e;
+      padding: 2px 6px;
+      border-radius: 8px;
+      font-size: 0.7rem;
+      font-weight: 600;
+    }
+    .taxable-status {
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+    .taxable-status.taxable {
+      background: #fecaca;
+      color: #991b1b;
+    }
+    .taxable-status.non-taxable {
+      background: #dcfce7;
+      color: #166534;
+    }
+    .component-inputs {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+    }
+    .input-group {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .input-group label {
+      font-size: 0.8rem;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .input-group input {
+      width: 100px;
+      padding: 6px 8px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-size: 0.9rem;
+    }
+    .totals-grid {
+      display: grid;
+      gap: 15px;
+    }
+    .total-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 15px;
+      background: #f1f5f9;
+      border-radius: 8px;
+    }
+    .total-item h4 {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .total-item .value {
+      font-size: 1.2rem;
+      font-weight: bold;
+      color: var(--primary);
+    }
+    .chart-container {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 30px;
+      box-shadow: var(--shadow);
+    }
+    .template-selector {
+      display: flex;
+      gap: 15px;
+      margin-bottom: 20px;
+      align-items: center;
+    }
+    @media (max-width: 768px) {
+      .salary-grid {
+        grid-template-columns: 1fr;
+      }
+      .component-row {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      .component-inputs {
+        justify-content: space-between;
+      }
+      .template-selector {
+        flex-direction: column;
+        align-items: stretch;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="header-content">
+      <h1><i class="fas fa-coins"></i> Salary Components</h1>
+      <div class="user-info">
+        <span id="currentUser">Loading...</span>
+        <button onclick="logout()" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</button>
+      </div>
+    </div>
+  </header>
+  
+  <div class="container">
+    <nav class="sidebar">
+      <div class="sidebar-header"><i class="fas fa-user-tie"></i><span>HR Portal</span></div>
+      <ul class="nav-links">
+        <li><a href="hr-dashboard.html"><i class="fas fa-users"></i><span>HR Dashboard</span></a></li>
+        <li><a href="employee-directory.html"><i class="fas fa-users"></i><span>Directory</span></a></li>
+        <li><a href="performance-reviews.html"><i class="fas fa-chart-line"></i><span>Performance</span></a></li>
+        <li><a href="audit-compliance.html"><i class="fas fa-shield-alt"></i><span>Audit</span></a></li>
+        <li><a href="payroll-calendar.html"><i class="fas fa-calendar-alt"></i><span>Payroll Calendar</span></a></li>
+        <li><a href="tax-calculator.html"><i class="fas fa-calculator"></i><span>Tax Calculator</span></a></li>
+        <li class="active"><a href="salary-components.html"><i class="fas fa-coins"></i><span>Salary Components</span></a></li>
+      </ul>
+    </nav>
+    
+    <main class="main-content">
+      <div class="page-header">
+        <h2><i class="fas fa-coins"></i> Salary Components</h2>
+        <p>Manage detailed salary structure and component breakdowns.</p>
+      </div>
+      
+      <!-- Employee Selection -->
+      <div class="content-section">
+        <div class="section-header">
+          <h3><i class="fas fa-user"></i> Employee Selection</h3>
+        </div>
+        <div class="template-selector">
+          <select id="employeeSelect" onchange="loadEmployeeSalary()" style="flex: 1;">
+            <option value="">Select Employee...</option>
+          </select>
+          <input type="number" id="ctcAmount" step="0.01" min="0" placeholder="CTC Amount" onchange="loadEmployeeSalary()">
+          <select id="templateSelect" onchange="loadTemplate()">
+            <option value="">Select Template...</option>
+            <option value="template_1">US Standard</option>
+            <option value="template_2">India CTC</option>
+          </select>
+        </div>
+      </div>
+      
+      <!-- Salary Components -->
+      <div class="salary-grid">
+        <div class="components-section">
+          <div class="section-header">
+            <h3><i class="fas fa-list"></i> Salary Components</h3>
+            <div>
+              <button onclick="addNewComponent()" class="secondary-btn">
+                <i class="fas fa-plus"></i> Add Component
+              </button>
+            </div>
+          </div>
+          <div id="componentsContainer">
+            <div class="no-data">Select an employee to view salary components</div>
+          </div>
+        </div>
+        
+        <div class="totals-section">
+          <h3><i class="fas fa-calculator"></i> Salary Totals</h3>
+          <div class="totals-grid">
+            <div class="total-item">
+              <h4>Total CTC</h4>
+              <div class="value" id="totalAmount">$0.00</div>
+            </div>
+            <div class="total-item">
+              <h4>Taxable Amount</h4>
+              <div class="value" id="taxableAmount">$0.00</div>
+            </div>
+            <div class="total-item">
+              <h4>Non-taxable Amount</h4>
+              <div class="value" id="nonTaxableAmount">$0.00</div>
+            </div>
+          </div>
+          <div class="modal-actions" style="margin-top: 20px;">
+            <button onclick="saveSalaryStructure()" class="primary-btn">
+              <i class="fas fa-save"></i> Save Structure
+            </button>
+            <button onclick="exportSalaryBreakdown()" class="secondary-btn">
+              <i class="fas fa-download"></i> Export
+            </button>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Salary Chart -->
+      <div class="chart-container">
+        <h3><i class="fas fa-chart-pie"></i> Salary Component Distribution</h3>
+        <canvas id="salaryChart" width="400" height="200"></canvas>
+      </div>
+    </main>
+  </div>
+  
+  <footer><p>&copy; 2025 PayrollPro by Aaron | Salary Components</p></footer>
+</body>
+</html>

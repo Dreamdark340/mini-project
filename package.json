@@ -1,0 +1,52 @@
+{
+  "name": "payrollpro",
+  "version": "1.0.0",
+  "description": "Enterprise-grade payroll management system with crypto integration and real 2FA authentication",
+  "main": "backend/mysqli-server.js",
+  "scripts": {
+    "start": "cd backend && npm start",
+    "dev": "cd backend && npm run dev",
+    "setup": "npm run setup:db && npm run setup:backend",
+    "setup:db": "mysql -u root -p payrollpro < backend/database/mysql-schema.sql",
+    "setup:backend": "cd backend && npm install && npm run db:seed",
+    "serve": "python3 -m http.server 3000",
+    "build": "echo 'No build step required for static files'",
+    "test": "cd backend && npm test",
+    "lint": "echo 'Linting not configured'",
+    "docs": "echo 'Documentation available in /docs folder'"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/payrollpro.git"
+  },
+  "keywords": [
+    "payroll",
+    "hr",
+    "crypto",
+    "2fa",
+    "authentication",
+    "mysql",
+    "enterprise",
+    "management",
+    "system"
+  ],
+  "author": "PayrollPro Team",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/yourusername/payrollpro/issues"
+  },
+  "homepage": "https://github.com/yourusername/payrollpro#readme",
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
+  "devDependencies": {},
+  "dependencies": {},
+  "files": [
+    "frontend/",
+    "backend/",
+    "docs/",
+    "README.md",
+    "LICENSE"
+  ]
+}

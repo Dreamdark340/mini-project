@@ -1,0 +1,190 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  email        String   @unique
+  passwordHash String
+  fullName     String
+  role         Role     @default(EMPLOYEE)
+  department   String?
+  isActive     Boolean  @default(true)
+  twoFAEnabled Boolean  @default(false)
+  twoFASecret  String?
+  recoveryCodes String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  auditLogs     AuditLog[]
+  loginHistory  LoginHistory[]
+  payrollRecords PayrollRecord[]
+  cryptoWallets CryptoWallet[]
+  cryptoTransactions CryptoTransaction[]
+  sessions      Session[]
+
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  userAgent String?
+  ipAddress String?
+  isActive  Boolean  @default(true)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  userId      String
+  action      String
+  description String?
+  ipAddress   String?
+  userAgent   String?
+  severity    Severity @default(INFO)
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("audit_logs")
+}
+
+model LoginHistory {
+  id        String   @id @default(cuid())
+  userId    String
+  username  String
+  ipAddress String?
+  userAgent String?
+  status    String
+  location  String?
+  timestamp DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("login_history")
+}
+
+model PayrollRecord {
+  id                 String   @id @default(cuid())
+  userId             String
+  periodStart        DateTime
+  periodEnd          DateTime
+  basicSalary        Decimal  @db.Decimal(10, 2)
+  hra                Decimal  @db.Decimal(10, 2) @default(0)
+  lta                Decimal  @db.Decimal(10, 2) @default(0)
+  medicalAllowance   Decimal  @db.Decimal(10, 2) @default(0)
+  transportAllowance Decimal  @db.Decimal(10, 2) @default(0)
+  bonus              Decimal  @db.Decimal(10, 2) @default(0)
+  deductions         Decimal  @db.Decimal(10, 2) @default(0)
+  tax                Decimal  @db.Decimal(10, 2) @default(0)
+  netPay             Decimal  @db.Decimal(10, 2)
+  taxRegion          String   @default("US")
+  status             PayrollStatus @default(PENDING)
+  createdBy          String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("payroll_records")
+}
+
+model CryptoWallet {
+  id           String   @id @default(cuid())
+  userId       String
+  cryptoType   String
+  walletAddress String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("crypto_wallets")
+}
+
+model CryptoTransaction {
+  id          String   @id @default(cuid())
+  userId      String
+  cryptoType  String
+  amount      Decimal  @db.Decimal(18, 8)
+  fiatValue   Decimal  @db.Decimal(10, 2)
+  txHash      String
+  status      CryptoTransactionStatus @default(PENDING)
+  gasFee      Decimal  @db.Decimal(18, 8) @default(0)
+  blockNumber BigInt?
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("crypto_transactions")
+}
+
+model SystemSetting {
+  id        String   @id @default(cuid())
+  category  String
+  key       String
+  value     String
+  type      String   @default("string") // string, number, boolean, json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([category, key])
+  @@map("system_settings")
+}
+
+model ExchangeRate {
+  id        String   @id @default(cuid())
+  cryptoType String
+  price     Decimal  @db.Decimal(18, 8)
+  change24h Decimal  @db.Decimal(10, 4)
+  volume24h Decimal  @db.Decimal(18, 2)
+  marketCap Decimal  @db.Decimal(18, 2)
+  timestamp DateTime @default(now())
+
+  @@map("exchange_rates")
+}
+
+enum Role {
+  EMPLOYEE
+  HR
+  ADMIN
+  CRYPTO_TRADER
+}
+
+enum Severity {
+  INFO
+  WARNING
+  ERROR
+  CRITICAL
+}
+
+enum PayrollStatus {
+  PENDING
+  PROCESSED
+  PAID
+  FAILED
+}
+
+enum CryptoTransactionStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+}

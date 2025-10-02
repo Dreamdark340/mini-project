@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bulk Payroll Import - Payroll Management</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <script>
+    function logout(){ localStorage.removeItem('authToken'); localStorage.removeItem('userRole'); localStorage.removeItem('username'); localStorage.removeItem('fullName'); window.location.href='login.html'; }
+    function checkAuth(){ const t=localStorage.getItem('authToken'); const r=localStorage.getItem('userRole'); const u=localStorage.getItem('username'); if(!t||!r||!u){ window.location.href='login.html'; return; } if(r!=='hr' && r!=='admin'){ alert('HR/Admin access required'); window.location.href='login.html'; return; } document.getElementById('currentUser').innerHTML=`<span>${localStorage.getItem('fullName') || u}</span><span class="role-badge">${r.toUpperCase()}</span>`; document.body.classList.add('employee-theme'); loadBulkImport(); }
+    
+    let parsedData = [];
+    let validationErrors = [];
+    
+    function loadBulkImport() {
+        loadImportHistory();
+        loadBulkImportAchievements();
+    }
+    
+    function downloadTemplate() {
+        const templateData = [
+            ['Employee ID', 'Employee Name', 'Basic Salary', 'HRA', 'LTA', 'Medical Allowance', 'Transport Allowance', 'Special Allowance', 'Tax Region', 'Bank Account', 'Routing Number'],
+            ['EMP0001', 'John Doe', '5000', '1500', '500', '200', '300', '1000', 'US', '1234567890', '123456789'],
+            ['EMP0002', 'Jane Smith', '6000', '1800', '600', '250', '350', '1200', 'US', '0987654321', '987654321'],
+            ['EMP0003', 'Bob Johnson', '4500', '1350', '450', '180', '270', '900', 'India', '1122334455', '112233445']
+        ];
+        
+        const csvContent = templateData.map(row => row.join(',')).join('\n');
+        const blob = new Blob([csvContent], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'payroll_import_template.csv';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        
+        // Track template download for achievement
+        trackTemplateDownload();
+    }
+    
+    function trackTemplateDownload() {
+        const username = localStorage.getItem('username');
+        const downloads = JSON.parse(localStorage.getItem(`templateDownloads_${username}`) || '[]');
+        downloads.push(new Date().toISOString());
+        localStorage.setItem(`templateDownloads_${username}`, JSON.stringify(downloads.slice(-100)));
+    }
+    
+    function handleFileUpload(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        
+        if (!file.name.toLowerCase().endsWith('.csv')) {
+            alert('Please upload a CSV file');
+            return;
+        }
+        
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            parseCSVData(e.target.result);
+        };
+        reader.readAsText(file);
+    }
+    
+    function parseCSVData(csvText) {
+        const lines = csvText.split('\n').filter(line => line.trim());
+        if (lines.length < 2) {
+            alert('CSV file must have at least a header row and one data row');
+            return;
+        }
+        
+        const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+        const data = lines.slice(1).map((line, index) => {
+            const values = line.split(',').map(v => v.trim().replace(/"/g, ''));
+            const row = {};
+            headers.forEach((header, i) => {
+                row[header] = values[i] || '';
+            });
+            row._rowNumber = index + 2; // +2 because we skip header and 0-index
+            return row;
+        });
+        
+        parsedData = data;
+        validateData();
+        displayPreview();
+    }
+    
+    function validateData() {
+        validationErrors = [];
+        const requiredFields = ['Employee ID', 'Employee Name', 'Basic Salary'];
+        
+        parsedData.forEach((row, index) => {
+            const rowErrors = [];
+            
+            // Check required fields
+            requiredFields.forEach(field => {
+                if (!row[field] || row[field].trim() === '') {
+                    rowErrors.push(`Missing required field: ${field}`);
+                }
+            });
+            
+            // Validate salary fields
+            const salaryFields = ['Basic Salary', 'HRA', 'LTA', 'Medical Allowance', 'Transport Allowance', 'Special Allowance'];
+            salaryFields.forEach(field => {
+                if (row[field] && isNaN(parseFloat(row[field]))) {
+                    rowErrors.push(`Invalid number in ${field}: ${row[field]}`);
+                }
+            });
+            
+            // Validate Employee ID format
+            if (row['Employee ID'] && !row['Employee ID'].match(/^EMP\d{4}$/)) {
+                rowErrors.push(`Invalid Employee ID format: ${row['Employee ID']}`);
+            }
+            
+            // Validate tax region
+            if (row['Tax Region'] && !['US', 'India'].includes(row['Tax Region'])) {
+                rowErrors.push(`Invalid tax region: ${row['Tax Region']}`);
+            }
+            
+            if (rowErrors.length > 0) {
+                validationErrors.push({
+                    rowNumber: row._rowNumber,
+                    errors: rowErrors
+                });
+            }
+        });
+        
+        // Check for duplicate Employee IDs
+        const employeeIds = parsedData.map(row => row['Employee ID']).filter(id => id);
+        const duplicates = employeeIds.filter((id, index) => employeeIds.indexOf(id) !== index);
+        if (duplicates.length > 0) {
+            validationErrors.push({
+                rowNumber: 'Multiple',
+                errors: [`Duplicate Employee IDs found: ${duplicates.join(', ')}`]
+            });
+        }
+    }
+    
+    function displayPreview() {
+        const container = document.getElementById('previewContainer');
+        const errorContainer = document.getElementById('errorContainer');
+        
+        if (validationErrors.length > 0) {
+            errorContainer.innerHTML = `
+                <div class="error-summary">
+                    <h4><i class="fas fa-exclamation-triangle"></i> Validation Errors (${validationErrors.length})</h4>
+                    <div class="error-list">
+                        ${validationErrors.map(error => `
+                            <div class="error-item">
+                                <strong>Row ${error.rowNumber}:</strong>
+                                <ul>
+                                    ${error.errors.map(err => `<li>${err}</li>`).join('')}
+                                </ul>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+            errorContainer.style.display = 'block';
+        } else {
+            errorContainer.style.display = 'none';
+        }
+        
+        if (parsedData.length === 0) {
+            container.innerHTML = '<div class="no-data">Upload a CSV file to preview data</div>';
+            return;
+        }
+        
+        const headers = Object.keys(parsedData[0]).filter(key => !key.startsWith('_'));
+        
+        container.innerHTML = `
+            <div class="preview-header">
+                <h4><i class="fas fa-eye"></i> Data Preview (${parsedData.length} rows)</h4>
+                <div class="preview-actions">
+                    <button onclick="processImport()" class="primary-btn" ${validationErrors.length > 0 ? 'disabled' : ''}>
+                        <i class="fas fa-upload"></i> Import Data
+                    </button>
+                    <button onclick="clearPreview()" class="secondary-btn">
+                        <i class="fas fa-times"></i> Clear
+                    </button>
+                </div>
+            </div>
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            ${headers.map(header => `<th>${header}</th>`).join('')}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${parsedData.slice(0, 10).map(row => `
+                            <tr class="${validationErrors.some(e => e.rowNumber === row._rowNumber) ? 'error-row' : ''}">
+                                ${headers.map(header => `<td>${row[header] || '-'}</td>`).join('')}
+                            </tr>
+                        `).join('')}
+                        ${parsedData.length > 10 ? `
+                            <tr>
+                                <td colspan="${headers.length}" class="more-data">
+                                    ... and ${parsedData.length - 10} more rows
+                                </td>
+                            </tr>
+                        ` : ''}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    }
+    
+    function processImport() {
+        if (validationErrors.length > 0) {
+            alert('Please fix validation errors before importing');
+            return;
+        }
+        
+        if (parsedData.length === 0) {
+            alert('No data to import');
+            return;
+        }
+        
+        if (!confirm(`Import ${parsedData.length} payroll records? This action cannot be undone.`)) {
+            return;
+        }
+        
+        try {
+            const username = localStorage.getItem('username');
+            const importId = `import_${Date.now()}`;
+            let successCount = 0;
+            let errorCount = 0;
+            
+            // Process each row
+            parsedData.forEach(row => {
+                try {
+                    // Update employee directory
+                    const employees = JSON.parse(localStorage.getItem('employeeDirectory') || '[]');
+                    let employee = employees.find(emp => emp.employeeId === row['Employee ID']);
+                    
+                    if (!employee) {
+                        // Create new employee
+                        employee = {
+                            employeeId: row['Employee ID'],
+                            name: row['Employee Name'],
+                            department: 'Operations', // Default department
+                            role: 'employee',
+                            username: row['Employee ID'].toLowerCase(),
+                            email: `${row['Employee ID'].toLowerCase()}@company.com`
+                        };
+                        employees.push(employee);
+                        localStorage.setItem('employeeDirectory', JSON.stringify(employees));
+                    }
+                    
+                    // Update salary data
+                    const salaryData = JSON.parse(localStorage.getItem('employeeSalaryData') || '[]');
+                    const ctc = parseFloat(row['Basic Salary']) + 
+                               parseFloat(row['HRA'] || 0) + 
+                               parseFloat(row['LTA'] || 0) + 
+                               parseFloat(row['Medical Allowance'] || 0) + 
+                               parseFloat(row['Transport Allowance'] || 0) + 
+                               parseFloat(row['Special Allowance'] || 0);
+                    
+                    const salaryRecord = {
+                        employeeId: row['Employee ID'],
+                        ctc: ctc,
+                        template: row['Tax Region'] === 'India' ? 'template_2' : 'template_1',
+                        components: [
+                            { type: 'basic', name: 'Basic Salary', percentage: 0, amount: parseFloat(row['Basic Salary']), taxable: true, mandatory: true },
+                            { type: 'hra', name: 'HRA', percentage: 0, amount: parseFloat(row['HRA'] || 0), taxable: true, mandatory: false },
+                            { type: 'lta', name: 'LTA', percentage: 0, amount: parseFloat(row['LTA'] || 0), taxable: false, mandatory: false },
+                            { type: 'medical', name: 'Medical Allowance', percentage: 0, amount: parseFloat(row['Medical Allowance'] || 0), taxable: false, mandatory: false },
+                            { type: 'transport', name: 'Transport Allowance', percentage: 0, amount: parseFloat(row['Transport Allowance'] || 0), taxable: true, mandatory: false },
+                            { type: 'special', name: 'Special Allowance', percentage: 0, amount: parseFloat(row['Special Allowance'] || 0), taxable: true, mandatory: false }
+                        ].filter(comp => comp.amount > 0),
+                        lastUpdated: new Date().toISOString(),
+                        updatedBy: username
+                    };
+                    
+                    const existingIndex = salaryData.findIndex(s => s.employeeId === row['Employee ID']);
+                    if (existingIndex >= 0) {
+                        salaryData[existingIndex] = salaryRecord;
+                    } else {
+                        salaryData.push(salaryRecord);
+                    }
+                    localStorage.setItem('employeeSalaryData', JSON.stringify(salaryData));
+                    
+                    // Update bank details
+                    if (row['Bank Account'] && row['Routing Number']) {
+                        const bankDetails = JSON.parse(localStorage.getItem('employeeBankDetails') || '[]');
+                        const bankRecord = {
+                            employeeId: row['Employee ID'],
+                            employeeName: row['Employee Name'],
+                            bankName: 'Company Bank', // Default bank
+                            accountNumber: `****${row['Bank Account'].slice(-4)}`,
+                            routingNumber: row['Routing Number'],
+                            accountType: 'Checking',
+                            netSalary: ctc * 0.8, // Estimate 80% net after taxes
+                            isActive: true,
+                            lastUpdated: new Date().toISOString()
+                        };
+                        
+                        const bankIndex = bankDetails.findIndex(b => b.employeeId === row['Employee ID']);
+                        if (bankIndex >= 0) {
+                            bankDetails[bankIndex] = bankRecord;
+                        } else {
+                            bankDetails.push(bankRecord);
+                        }
+                        localStorage.setItem('employeeBankDetails', JSON.stringify(bankDetails));
+                    }
+                    
+                    successCount++;
+                } catch (error) {
+                    console.error('Error processing row:', row, error);
+                    errorCount++;
+                }
+            });
+            
+            // Record import history
+            const importHistory = JSON.parse(localStorage.getItem('importHistory') || '[]');
+            importHistory.unshift({
+                id: importId,
+                date: new Date().toISOString(),
+                importedBy: username,
+                totalRows: parsedData.length,
+                successCount: successCount,
+                errorCount: errorCount,
+                status: errorCount === 0 ? 'Success' : 'Partial Success'
+            });
+            localStorage.setItem('importHistory', JSON.stringify(importHistory.slice(0, 50)));
+            
+            // Check for achievements
+            checkBulkImportAchievements(username);
+            
+            alert(`Import completed!\n\nSuccessful: ${successCount}\nErrors: ${errorCount}\n\nImport ID: ${importId}`);
+            
+            clearPreview();
+            loadImportHistory();
+            
+        } catch (error) {
+            console.error('Import failed:', error);
+            alert('Import failed. Please check the data and try again.');
+        }
+    }
+    
+    function clearPreview() {
+        parsedData = [];
+        validationErrors = [];
+        document.getElementById('previewContainer').innerHTML = '<div class="no-data">Upload a CSV file to preview data</div>';
+        document.getElementById('errorContainer').style.display = 'none';
+        document.getElementById('fileInput').value = '';
+    }
+    
+    function loadImportHistory() {
+        const history = JSON.parse(localStorage.getItem('importHistory') || '[]');
+        const tbody = document.getElementById('importHistoryBody');
+        
+        if (history.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" class="no-data">No import history found</td></tr>';
+            return;
+        }
+        
+        tbody.innerHTML = history.map(importRecord => `
+            <tr>
+                <td>${importRecord.id}</td>
+                <td>${new Date(importRecord.date).toLocaleString()}</td>
+                <td>${importRecord.importedBy}</td>
+                <td>${importRecord.totalRows}</td>
+                <td>${importRecord.successCount} / ${importRecord.errorCount}</td>
+                <td>
+                    <span class="status-badge ${importRecord.status === 'Success' ? 'success' : 'warning'}">${importRecord.status}</span>
+                </td>
+            </tr>
+        `).join('');
+    }
+    
+    function checkBulkImportAchievements(username) {
+        const history = JSON.parse(localStorage.getItem('importHistory') || '[]');
+        const successfulImports = history.filter(h => h.status === 'Success').length;
+        const totalImports = history.length;
+        
+        const achievements = JSON.parse(localStorage.getItem(`achievements_${username}`) || '[]');
+        
+        const bulkAchievements = [
+            {
+                id: 'bulk_boss',
+                title: 'Bulk Boss',
+                description: 'Successfully import payroll data 5 times',
+                icon: 'fas fa-upload',
+                xpReward: 300,
+                condition: () => successfulImports >= 5
+            },
+            {
+                id: 'import_master',
+                title: 'Import Master',
+                description: 'Import 100+ employee records in one go',
+                icon: 'fas fa-database',
+                xpReward: 500,
+                condition: () => history.some(h => h.totalRows >= 100 && h.status === 'Success')
+            },
+            {
+                id: 'error_free',
+                title: 'Error Free',
+                description: 'Complete 3 imports without any errors',
+                icon: 'fas fa-check-circle',
+                xpReward: 400,
+                condition: () => history.filter(h => h.errorCount === 0).length >= 3
+            }
+        ];
+        
+        bulkAchievements.forEach(achievement => {
+            if (!achievements.includes(achievement.id) && achievement.condition()) {
+                awardBulkImportAchievement(achievement);
+            }
+        });
+    }
+    
+    function awardBulkImportAchievement(achievement) {
+        const username = localStorage.getItem('username');
+        const earnedAchievements = JSON.parse(localStorage.getItem(`achievements_${username}`) || '[]');
+        earnedAchievements.push(achievement.id);
+        localStorage.setItem(`achievements_${username}`, JSON.stringify(earnedAchievements));
+        
+        showAchievementNotification(achievement);
+    }
+    
+    function showAchievementNotification(achievement) {
+        const notification = document.createElement('div');
+        notification.className = 'achievement-notification';
+        notification.innerHTML = `
+            <div class="notification-content">
+                <div class="notification-icon">
+                    <i class="${achievement.icon}"></i>
+                </div>
+                <div class="notification-text">
+                    <h4>Achievement Unlocked!</h4>
+                    <p>${achievement.title}</p>
+                    <span class="xp-reward">+${achievement.xpReward} XP</span>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(notification);
+        
+        setTimeout(() => notification.classList.add('show'), 100);
+        
+        setTimeout(() => {
+            notification.classList.remove('show');
+            setTimeout(() => notification.remove(), 300);
+        }, 5000);
+    }
+    
+    function loadBulkImportAchievements() {
+        // This function is called on page load to check existing achievements
+        const username = localStorage.getItem('username');
+        checkBulkImportAchievements(username);
+    }
+    
+    document.addEventListener('DOMContentLoaded', checkAuth);
+  </script>
+  <style>
+    .upload-section {
+      background: var(--card);
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 40px;
+      text-align: center;
+      margin-bottom: 30px;
+      box-shadow: var(--shadow);
+    }
+    .upload-section.dragover {
+      border-color: var(--primary);
+      background: #f0f9ff;
+    }
+    .upload-icon {
+      font-size: 3rem;
+      color: var(--muted);
+      margin-bottom: 15px;
+    }
+    .file-input-wrapper {
+      position: relative;
+      display: inline-block;
+    }
+    .file-input-wrapper input[type="file"] {
+      position: absolute;
+      opacity: 0;
+      width: 100%;
+      height: 100%;
+      cursor: pointer;
+    }
+    .preview-container {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 30px;
+      box-shadow: var(--shadow);
+    }
+    .preview-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    .preview-actions {
+      display: flex;
+      gap: 10px;
+    }
+    .error-container {
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .error-summary h4 {
+      color: #dc2626;
+      margin: 0 0 15px;
+    }
+    .error-item {
+      margin-bottom: 15px;
+      padding: 10px;
+      background: white;
+      border-radius: 6px;
+      border-left: 4px solid #dc2626;
+    }
+    .error-item strong {
+      color: #dc2626;
+    }
+    .error-item ul {
+      margin: 5px 0 0 20px;
+    }
+    .error-item li {
+      color: #7f1d1d;
+      font-size: 0.9rem;
+    }
+    .error-row {
+      background: #fef2f2 !important;
+    }
+    .more-data {
+      text-align: center;
+      color: var(--muted);
+      font-style: italic;
+    }
+    .template-section {
+      background: #f0f9ff;
+      border: 1px solid #0ea5e9;
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 30px;
+      text-align: center;
+    }
+    .template-section h3 {
+      margin: 0 0 10px;
+      color: var(--primary);
+    }
+    .template-section p {
+      margin: 0 0 15px;
+      color: var(--muted);
+    }
+    .achievement-notification {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: white;
+      border: 1px solid #10b981;
+      border-radius: 12px;
+      padding: 15px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+      z-index: 1000;
+      transform: translateX(400px);
+      transition: transform 0.3s ease;
+    }
+    .achievement-notification.show {
+      transform: translateX(0);
+    }
+    .notification-content {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+    }
+    .notification-icon {
+      width: 50px;
+      height: 50px;
+      background: #10b981;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 1.2rem;
+    }
+    .notification-text h4 {
+      margin: 0 0 5px;
+      color: var(--text);
+      font-size: 1rem;
+    }
+    .notification-text p {
+      margin: 0 0 5px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .xp-reward {
+      color: #f59e0b;
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+    @media (max-width: 768px) {
+      .preview-header {
+        flex-direction: column;
+        gap: 15px;
+      }
+      .preview-actions {
+        justify-content: center;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="header-content">
+      <h1><i class="fas fa-upload"></i> Bulk Payroll Import</h1>
+      <div class="user-info">
+        <span id="currentUser">Loading...</span>
+        <button onclick="logout()" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</button>
+      </div>
+    </div>
+  </header>
+  
+  <div class="container">
+    <nav class="sidebar">
+      <div class="sidebar-header"><i class="fas fa-user-tie"></i><span>HR Portal</span></div>
+      <ul class="nav-links">
+        <li><a href="hr-dashboard.html"><i class="fas fa-users"></i><span>HR Dashboard</span></a></li>
+        <li><a href="employee-directory.html"><i class="fas fa-users"></i><span>Directory</span></a></li>
+        <li><a href="performance-reviews.html"><i class="fas fa-chart-line"></i><span>Performance</span></a></li>
+        <li><a href="audit-compliance.html"><i class="fas fa-shield-alt"></i><span>Audit</span></a></li>
+        <li><a href="payroll-calendar.html"><i class="fas fa-calendar-alt"></i><span>Payroll Calendar</span></a></li>
+        <li><a href="tax-calculator.html"><i class="fas fa-calculator"></i><span>Tax Calculator</span></a></li>
+        <li><a href="salary-components.html"><i class="fas fa-coins"></i><span>Salary Components</span></a></li>
+        <li><a href="bank-transfers.html"><i class="fas fa-university"></i><span>Bank Transfers</span></a></li>
+        <li><a href="payroll-analytics.html"><i class="fas fa-chart-bar"></i><span>Analytics</span></a></li>
+        <li class="active"><a href="bulk-payroll-import.html"><i class="fas fa-upload"></i><span>Bulk Import</span></a></li>
+      </ul>
+    </nav>
+    
+    <main class="main-content">
+      <div class="page-header">
+        <h2><i class="fas fa-upload"></i> Bulk Payroll Import</h2>
+        <p>Import employee payroll data from CSV files for efficient processing.</p>
+      </div>
+      
+      <!-- Template Download -->
+      <div class="template-section">
+        <h3><i class="fas fa-download"></i> Download CSV Template</h3>
+        <p>Use our template to ensure proper data format for import.</p>
+        <button onclick="downloadTemplate()" class="primary-btn">
+          <i class="fas fa-file-csv"></i> Download Template
+        </button>
+      </div>
+      
+      <!-- File Upload -->
+      <div class="upload-section" id="uploadSection">
+        <div class="upload-icon">
+          <i class="fas fa-cloud-upload-alt"></i>
+        </div>
+        <h3>Upload CSV File</h3>
+        <p>Drag and drop your CSV file here, or click to browse</p>
+        <div class="file-input-wrapper">
+          <input type="file" id="fileInput" accept=".csv" onchange="handleFileUpload(event)">
+          <button class="primary-btn">
+            <i class="fas fa-folder-open"></i> Choose File
+          </button>
+        </div>
+      </div>
+      
+      <!-- Error Display -->
+      <div id="errorContainer" class="error-container" style="display: none;">
+        <!-- Validation errors will be displayed here -->
+      </div>
+      
+      <!-- Data Preview -->
+      <div id="previewContainer" class="preview-container">
+        <div class="no-data">Upload a CSV file to preview data</div>
+      </div>
+      
+      <!-- Import History -->
+      <div class="content-section">
+        <div class="section-header">
+          <h3><i class="fas fa-history"></i> Import History</h3>
+        </div>
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Import ID</th>
+                <th>Date</th>
+                <th>Imported By</th>
+                <th>Total Rows</th>
+                <th>Success/Errors</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="importHistoryBody">
+              <!-- Import history will be populated here -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+  
+  <footer><p>&copy; 2025 PayrollPro by Aaron | Bulk Payroll Import</p></footer>
+</body>
+</html>

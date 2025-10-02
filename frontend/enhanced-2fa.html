@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Enhanced 2FA Setup - Payroll Management</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+  <script>
+    function logout(){ localStorage.removeItem('authToken'); localStorage.removeItem('userRole'); localStorage.removeItem('username'); localStorage.removeItem('fullName'); window.location.href='login.html'; }
+    function checkAuth(){ const t=localStorage.getItem('authToken'); const r=localStorage.getItem('userRole'); const u=localStorage.getItem('username'); if(!t||!r||!u){ window.location.href='login.html'; return; } document.getElementById('currentUser').innerHTML=`<span>${localStorage.getItem('fullName') || u}</span><span class="role-badge">${r.toUpperCase()}</span>`; document.body.classList.add('employee-theme'); loadSecuritySettings(); }
+    
+    let userRole = localStorage.getItem('userRole');
+    let currentSecret = null;
+    
+    function loadSecuritySettings() {
+        loadUser2FAStatus();
+        loadSecurityHistory();
+        loadRoleBasedPermissions();
+    }
+    
+    function loadUser2FAStatus() {
+        const username = localStorage.getItem('username');
+        const user2FA = JSON.parse(localStorage.getItem(`user2FA_${username}`) || '{}');
+        
+        if (Object.keys(user2FA).length === 0) {
+            // Initialize demo 2FA data
+            const demo2FA = {
+                username: username,
+                secret: generateSecret(),
+                backupCodes: generateBackupCodes(),
+                isEnabled: false,
+                lastUsed: null,
+                setupDate: null,
+                recoveryCodesUsed: []
+            };
+            localStorage.setItem(`user2FA_${username}`, JSON.stringify(demo2FA));
+            display2FAStatus(demo2FA);
+        } else {
+            display2FAStatus(user2FA);
+        }
+    }
+    
+    function generateSecret() {
+        // Generate a random secret for TOTP (Time-based One-Time Password)
+        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+        let secret = '';
+        for (let i = 0; i < 32; i++) {
+            secret += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        return secret;
+    }
+    
+    function generateBackupCodes() {
+        const codes = [];
+        for (let i = 0; i < 10; i++) {
+            codes.push(Math.random().toString(36).substr(2, 8).toUpperCase());
+        }
+        return codes;
+    }
+    
+    function display2FAStatus(user2FA) {
+        const statusContainer = document.getElementById('twoFAStatus');
+        const setupContainer = document.getElementById('twoFASetup');
+        
+        if (user2FA.isEnabled) {
+            statusContainer.innerHTML = `
+                <div class="security-status enabled">
+                    <div class="status-icon">
+                        <i class="fas fa-shield-check"></i>
+                    </div>
+                    <div class="status-info">
+                        <h3>Two-Factor Authentication Enabled</h3>
+                        <p>Your account is protected with Google Authenticator</p>
+                        <div class="status-details">
+                            <span>Setup Date: ${user2FA.setupDate ? new Date(user2FA.setupDate).toLocaleDateString() : 'Unknown'}</span>
+                            <span>Last Used: ${user2FA.lastUsed ? new Date(user2FA.lastUsed).toLocaleDateString() : 'Never'}</span>
+                        </div>
+                    </div>
+                    <div class="status-actions">
+                        <button onclick="disable2FA()" class="danger">
+                            <i class="fas fa-ban"></i> Disable 2FA
+                        </button>
+                        <button onclick="regenerateBackupCodes()" class="secondary-btn">
+                            <i class="fas fa-key"></i> New Backup Codes
+                        </button>
+                    </div>
+                </div>
+            `;
+            setupContainer.style.display = 'none';
+        } else {
+            statusContainer.innerHTML = `
+                <div class="security-status disabled">
+                    <div class="status-icon">
+                        <i class="fas fa-shield-exclamation"></i>
+                    </div>
+                    <div class="status-info">
+                        <h3>Two-Factor Authentication Disabled</h3>
+                        <p>Secure your account with Google Authenticator</p>
+                        <div class="security-warning">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <span>Your account is vulnerable without 2FA protection</span>
+                        </div>
+                    </div>
+                    <div class="status-actions">
+                        <button onclick="setup2FA()" class="primary-btn">
+                            <i class="fas fa-shield-alt"></i> Enable 2FA
+                        </button>
+                    </div>
+                </div>
+            `;
+            setupContainer.style.display = 'block';
+        }
+    }
+    
+    function setup2FA() {
+        const username = localStorage.getItem('username');
+        const user2FA = JSON.parse(localStorage.getItem(`user2FA_${username}`) || '{}');
+        
+        currentSecret = user2FA.secret;
+        
+        // Generate QR code
+        const issuer = 'PayrollPro';
+        const accountName = `${username}@payrollpro.com`;
+        const otpauth = `otpauth://totp/${encodeURIComponent(issuer)}:${encodeURIComponent(accountName)}?secret=${currentSecret}&issuer=${encodeURIComponent(issuer)}`;
+        
+        QRCode.toCanvas(document.getElementById('qrcode'), otpauth, {
+            width: 200,
+            height: 200,
+            color: {
+                dark: '#000000',
+                light: '#FFFFFF'
+            }
+        });
+        
+        document.getElementById('secretKey').textContent = currentSecret;
+        document.getElementById('setupModal').style.display = 'block';
+        
+        // Log security event
+        logSecurityEvent('2FA_SETUP_INITIATED', 'User initiated 2FA setup process');
+    }
+    
+    function verify2FASetup() {
+        const code = document.getElementById('verificationCode').value.trim();
+        
+        if (!code || code.length !== 6) {
+            alert('Please enter a valid 6-digit code');
+            return;
+        }
+        
+        // Simulate TOTP verification (in real app, would verify against current time)
+        const isValid = Math.random() > 0.1; // 90% success rate for demo
+        
+        if (isValid) {
+            enable2FA();
+            document.getElementById('setupModal').style.display = 'none';
+            alert('Two-Factor Authentication enabled successfully!');
+        } else {
+            alert('Invalid verification code. Please try again.');
+        }
+    }
+    
+    function enable2FA() {
+        const username = localStorage.getItem('username');
+        const user2FA = JSON.parse(localStorage.getItem(`user2FA_${username}`) || '{}');
+        
+        user2FA.isEnabled = true;
+        user2FA.setupDate = new Date().toISOString();
+        user2FA.lastUsed = new Date().toISOString();
+        
+        localStorage.setItem(`user2FA_${username}`, JSON.stringify(user2FA));
+        
+        // Show backup codes
+        showBackupCodes(user2FA.backupCodes);
+        
+        // Log security event
+        logSecurityEvent('2FA_ENABLED', 'User successfully enabled 2FA');
+        
+        // Award achievement
+        awardSecurityAchievement('security_master', 'Security Master', 'Enabled two-factor authentication', 300);
+        
+        loadUser2FAStatus();
+    }
+    
+    function showBackupCodes(codes) {
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.innerHTML = `
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3><i class="fas fa-key"></i> Backup Codes</h3>
+                </div>
+                <div class="backup-codes-container">
+                    <div class="backup-warning">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <p>Save these backup codes in a secure location. Each code can only be used once.</p>
+                    </div>
+                    <div class="backup-codes">
+                        ${codes.map(code => `<div class="backup-code">${code}</div>`).join('')}
+                    </div>
+                    <div class="backup-actions">
+                        <button onclick="printBackupCodes()" class="secondary-btn">
+                            <i class="fas fa-print"></i> Print
+                        </button>
+                        <button onclick="downloadBackupCodes()" class="secondary-btn">
+                            <i class="fas fa-download"></i> Download
+                        </button>
+                        <button onclick="this.closest('.modal').remove()" class="primary-btn">
+                            <i class="fas fa-check"></i> I've Saved Them
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+    }
+    
+    function disable2FA() {
+        if (!confirm('Are you sure you want to disable Two-Factor Authentication? This will make your account less secure.')) {
+            return;
+        }
+        
+        const username = localStorage.getItem('username');
+        const user2FA = JSON.parse(localStorage.getItem(`user2FA_${username}`) || '{}');
+        
+        user2FA.isEnabled = false;
+        user2FA.disabledDate = new Date().toISOString();
+        
+        localStorage.setItem(`user2FA_${username}`, JSON.stringify(user2FA));
+        
+        // Log security event
+        logSecurityEvent('2FA_DISABLED', 'User disabled 2FA');
+        
+        loadUser2FAStatus();
+        alert('Two-Factor Authentication has been disabled.');
+    }
+    
+    function regenerateBackupCodes() {
+        if (!confirm('This will invalidate your existing backup codes. Are you sure?')) {
+            return;
+        }
+        
+        const username = localStorage.getItem('username');
+        const user2FA = JSON.parse(localStorage.getItem(`user2FA_${username}`) || '{}');
+        
+        user2FA.backupCodes = generateBackupCodes();
+        user2FA.recoveryCodesUsed = [];
+        
+        localStorage.setItem(`user2FA_${username}`, JSON.stringify(user2FA));
+        
+        showBackupCodes(user2FA.backupCodes);
+        
+        // Log security event
+        logSecurityEvent('BACKUP_CODES_REGENERATED', 'User regenerated backup codes');
+    }
+    
+    function loadSecurityHistory() {
+        const username = localStorage.getItem('username');
+        const history = JSON.parse(localStorage.getItem(`securityHistory_${username}`) || '[]');
+        
+        const tbody = document.getElementById('securityHistoryBody');
+        
+        if (history.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" class="no-data">No security events found</td></tr>';
+            return;
+        }
+        
+        tbody.innerHTML = history.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).map(event => `
+            <tr>
+                <td>${new Date(event.timestamp).toLocaleString()}</td>
+                <td>${event.action}</td>
+                <td>${event.description}</td>
+                <td><span class="status-badge ${event.severity}">${event.severity.toUpperCase()}</span></td>
+            </tr>
+        `).join('');
+    }
+    
+    function loadRoleBasedPermissions() {
+        const rolePermissions = {
+            employee: [
+                { feature: 'View Own Data', enabled: true },
+                { feature: 'Update Profile', enabled: true },
+                { feature: 'Submit Leave Requests', enabled: true },
+                { feature: 'Track Time', enabled: true },
+                { feature: 'Submit Expenses', enabled: true },
+                { feature: 'View Payslips', enabled: true }
+            ],
+            hr: [
+                { feature: 'View All Employee Data', enabled: true },
+                { feature: 'Manage Payroll', enabled: true },
+                { feature: 'Approve Leave Requests', enabled: true },
+                { feature: 'Process Expenses', enabled: true },
+                { feature: 'Generate Reports', enabled: true },
+                { feature: 'Manage Employee Roles', enabled: true },
+                { feature: 'Access Analytics', enabled: true },
+                { feature: 'Bulk Operations', enabled: true }
+            ],
+            admin: [
+                { feature: 'Full System Access', enabled: true },
+                { feature: 'User Management', enabled: true },
+                { feature: 'System Configuration', enabled: true },
+                { feature: 'Audit Logs', enabled: true },
+                { feature: 'Security Settings', enabled: true },
+                { feature: 'Backup & Restore', enabled: true },
+                { feature: 'API Management', enabled: true },
+                { feature: 'Crypto Operations', enabled: true }
+            ],
+            'crypto-trader': [
+                { feature: 'Crypto Portfolio Management', enabled: true },
+                { feature: 'Exchange Integration', enabled: true },
+                { feature: 'Trading Operations', enabled: true },
+                { feature: 'Risk Management', enabled: true },
+                { feature: 'Compliance Reporting', enabled: true },
+                { feature: 'Multi-Signature Wallets', enabled: true }
+            ]
+        };
+        
+        const currentRole = localStorage.getItem('userRole');
+        const permissions = rolePermissions[currentRole] || [];
+        
+        const container = document.getElementById('rolePermissionsContainer');
+        container.innerHTML = `
+            <h3><i class="fas fa-user-shield"></i> Role-Based Permissions (${currentRole.toUpperCase()})</h3>
+            <div class="permissions-grid">
+                ${permissions.map(permission => `
+                    <div class="permission-item ${permission.enabled ? 'enabled' : 'disabled'}">
+                        <div class="permission-icon">
+                            <i class="fas fa-${permission.enabled ? 'check-circle' : 'times-circle'}"></i>
+                        </div>
+                        <div class="permission-name">${permission.feature}</div>
+                        <div class="permission-status">${permission.enabled ? 'Enabled' : 'Disabled'}</div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+    
+    function logSecurityEvent(action, description, severity = 'info') {
+        const username = localStorage.getItem('username');
+        const event = {
+            timestamp: new Date().toISOString(),
+            action: action,
+            description: description,
+            severity: severity,
+            ipAddress: '192.168.1.100', // Demo IP
+            userAgent: navigator.userAgent
+        };
+        
+        const history = JSON.parse(localStorage.getItem(`securityHistory_${username}`) || '[]');
+        history.unshift(event);
+        localStorage.setItem(`securityHistory_${username}`, JSON.stringify(history.slice(0, 100)));
+    }
+    
+    function awardSecurityAchievement(id, title, description, xpReward) {
+        const username = localStorage.getItem('username');
+        const achievements = JSON.parse(localStorage.getItem(`achievements_${username}`) || '[]');
+        
+        if (!achievements.includes(id)) {
+            achievements.push(id);
+            localStorage.setItem(`achievements_${username}`, JSON.stringify(achievements));
+            
+            showAchievementNotification(id, title, xpReward);
+        }
+    }
+    
+    function showAchievementNotification(id, title, xpReward) {
+        const notification = document.createElement('div');
+        notification.className = 'achievement-notification security-achievement';
+        notification.innerHTML = `
+            <div class="notification-content">
+                <div class="notification-icon">
+                    <i class="fas fa-shield-alt"></i>
+                </div>
+                <div class="notification-text">
+                    <h4>Achievement Unlocked!</h4>
+                    <p>${title}</p>
+                    <span class="xp-reward">+${xpReward} XP</span>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(notification);
+        
+        setTimeout(() => notification.classList.add('show'), 100);
+        
+        setTimeout(() => {
+            notification.classList.remove('show');
+            setTimeout(() => notification.remove(), 300);
+        }, 5000);
+    }
+    
+    function printBackupCodes() {
+        window.print();
+    }
+    
+    function downloadBackupCodes() {
+        const username = localStorage.getItem('username');
+        const user2FA = JSON.parse(localStorage.getItem(`user2FA_${username}`) || '{}');
+        
+        const content = `PayrollPro Backup Codes for ${username}\n\nGenerated: ${new Date().toLocaleString()}\n\n${user2FA.backupCodes.map(code => code).join('\n')}\n\nKeep these codes safe and do not share them with anyone.`;
+        
+        const blob = new Blob([content], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `payrollpro_backup_codes_${username}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    }
+    
+    // Close modals when clicking outside
+    window.onclick = function(event) {
+        const modals = document.querySelectorAll('.modal');
+        modals.forEach(modal => {
+            if (event.target === modal) {
+                modal.style.display = 'none';
+            }
+        });
+    }
+    
+    document.addEventListener('DOMContentLoaded', checkAuth);
+  </script>
+  <style>
+    .security-status {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      padding: 20px;
+      border-radius: var(--radius);
+      margin-bottom: 30px;
+    }
+    .security-status.enabled {
+      background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
+      border: 1px solid #10b981;
+    }
+    .security-status.disabled {
+      background: linear-gradient(135deg, #fef2f2 0%, #fecaca 100%);
+      border: 1px solid #ef4444;
+    }
+    .status-icon {
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+      color: white;
+    }
+    .security-status.enabled .status-icon {
+      background: #10b981;
+    }
+    .security-status.disabled .status-icon {
+      background: #ef4444;
+    }
+    .status-info {
+      flex: 1;
+    }
+    .status-info h3 {
+      margin: 0 0 5px;
+      color: var(--text);
+    }
+    .status-info p {
+      margin: 0 0 10px;
+      color: var(--muted);
+    }
+    .status-details {
+      display: flex;
+      gap: 20px;
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+    .security-warning {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #dc2626;
+      font-weight: 600;
+      margin-top: 10px;
+    }
+    .status-actions {
+      display: flex;
+      gap: 10px;
+    }
+    .setup-container {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 30px;
+      text-align: center;
+      box-shadow: var(--shadow);
+    }
+    .qr-container {
+      margin: 20px 0;
+    }
+    .secret-display {
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px;
+      margin: 15px 0;
+      font-family: monospace;
+      font-size: 0.9rem;
+      word-break: break-all;
+    }
+    .backup-codes-container {
+      padding: 20px;
+    }
+    .backup-warning {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #fef3c7;
+      border: 1px solid #f59e0b;
+      border-radius: 6px;
+      padding: 15px;
+      margin-bottom: 20px;
+      color: #92400e;
+    }
+    .backup-codes {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    .backup-code {
+      background: #f1f5f9;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px;
+      text-align: center;
+      font-family: monospace;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .backup-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+    }
+    .permissions-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 15px;
+      margin-top: 20px;
+    }
+    .permission-item {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+      padding: 15px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+    }
+    .permission-item.enabled {
+      background: #f0f9ff;
+      border-color: #3b82f6;
+    }
+    .permission-item.disabled {
+      background: #f8fafc;
+      border-color: #e5e7eb;
+    }
+    .permission-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .permission-item.enabled .permission-icon {
+      background: #3b82f6;
+      color: white;
+    }
+    .permission-item.disabled .permission-icon {
+      background: #e5e7eb;
+      color: #9ca3af;
+    }
+    .permission-name {
+      flex: 1;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .permission-status {
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+    .permission-item.enabled .permission-status {
+      color: #10b981;
+    }
+    .permission-item.disabled .permission-status {
+      color: #6b7280;
+    }
+    .security-achievement {
+      border-color: #3b82f6;
+      background: linear-gradient(135deg, #f0f9ff 0%, #ffffff 100%);
+    }
+    @media (max-width: 768px) {
+      .security-status {
+        flex-direction: column;
+        text-align: center;
+      }
+      .status-actions {
+        flex-direction: column;
+      }
+      .status-details {
+        flex-direction: column;
+        gap: 5px;
+      }
+      .backup-codes {
+        grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+      }
+      .backup-actions {
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="header-content">
+      <h1><i class="fas fa-shield-alt"></i> Enhanced Security</h1>
+      <div class="user-info">
+        <span id="currentUser">Loading...</span>
+        <button onclick="logout()" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Logout</button>
+      </div>
+    </div>
+  </header>
+  
+  <div class="container">
+    <nav class="sidebar">
+      <div class="sidebar-header"><i class="fas fa-user-tie"></i><span>Security Portal</span></div>
+      <ul class="nav-links">
+        <li><a href="employee-dashboard.html"><i class="fas fa-tachometer-alt"></i><span>Dashboard</span></a></li>
+        <li><a href="employee-profile.html"><i class="fas fa-user-cog"></i><span>Profile</span></a></li>
+        <li class="active"><a href="enhanced-2fa.html"><i class="fas fa-shield-alt"></i><span>2FA Security</span></a></li>
+        <li><a href="crypto-payroll.html"><i class="fas fa-coins"></i><span>Crypto Payroll</span></a></li>
+        <li><a href="audit-compliance.html"><i class="fas fa-clipboard-check"></i><span>Audit Logs</span></a></li>
+      </ul>
+    </nav>
+    
+    <main class="main-content">
+      <div class="page-header">
+        <h2><i class="fas fa-shield-alt"></i> Enhanced Security Settings</h2>
+        <p>Protect your account with advanced security features.</p>
+      </div>
+      
+      <!-- 2FA Status -->
+      <div id="twoFAStatus" class="content-section">
+        <!-- 2FA status will be populated here -->
+      </div>
+      
+      <!-- 2FA Setup -->
+      <div id="twoFASetup" class="content-section" style="display: none;">
+        <div class="setup-container">
+          <h3><i class="fas fa-mobile-alt"></i> Set up Google Authenticator</h3>
+          <p>Scan the QR code with your Google Authenticator app to enable two-factor authentication.</p>
+          <button onclick="setup2FA()" class="primary-btn">
+            <i class="fas fa-qrcode"></i> Start Setup
+          </button>
+        </div>
+      </div>
+      
+      <!-- Role-Based Permissions -->
+      <div class="content-section">
+        <div id="rolePermissionsContainer">
+          <!-- Role permissions will be populated here -->
+        </div>
+      </div>
+      
+      <!-- Security History -->
+      <div class="content-section">
+        <div class="section-header">
+          <h3><i class="fas fa-history"></i> Security Event History</h3>
+        </div>
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Timestamp</th>
+                <th>Action</th>
+                <th>Description</th>
+                <th>Severity</th>
+              </tr>
+            </thead>
+            <tbody id="securityHistoryBody">
+              <!-- Security history will be populated here -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+  
+  <footer><p>&copy; 2025 PayrollPro by Aaron | Enhanced Security</p></footer>
+  
+  <!-- 2FA Setup Modal -->
+  <div id="setupModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3><i class="fas fa-mobile-alt"></i> Setup Google Authenticator</h3>
+        <span class="close" onclick="document.getElementById('setupModal').style.display='none'">&times;</span>
+      </div>
+      <div class="qr-container">
+        <canvas id="qrcode"></canvas>
+      </div>
+      <div class="secret-display">
+        <strong>Manual Entry Key:</strong><br>
+        <span id="secretKey"></span>
+      </div>
+      <p>1. Open Google Authenticator on your phone</p>
+      <p>2. Scan the QR code or enter the manual key</p>
+      <p>3. Enter the 6-digit code below</p>
+      <div class="form-group">
+        <label for="verificationCode">Verification Code</label>
+        <input type="text" id="verificationCode" placeholder="123456" maxlength="6" pattern="[0-9]{6}">
+      </div>
+      <div class="modal-actions">
+        <button onclick="document.getElementById('setupModal').style.display='none'" class="secondary-btn">Cancel</button>
+        <button onclick="verify2FASetup()" class="primary-btn">Verify & Enable</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
