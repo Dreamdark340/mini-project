@@ -15,7 +15,8 @@
     const demoUsers = {
       'aaron': { password: 'password', role: 'employee', fullName: 'Aaron Employee' },
       'hr1': { password: 'password', role: 'hr', fullName: 'Harper HR' },
-      'admin': { password: 'admin123', role: 'admin', fullName: 'Alex Admin' }
+      'admin': { password: 'admin123', role: 'admin', fullName: 'Alex Admin' },
+      'crypto1': { password: 'crypto123', role: 'crypto-trader', fullName: 'Crypto Trader' }
     };
 
     function onDomReady(){
@@ -111,6 +112,8 @@
       const role = user.role.toLowerCase();
       if(role === 'hr' || role === 'admin'){ 
         window.location.href='hr-dashboard.html'; 
+      } else if(role === 'crypto-trader'){
+        window.location.href='crypto-trader-dashboard.html';
       } else { 
         window.location.href='employee-dashboard.html'; 
       }
@@ -124,6 +127,7 @@
         if(v==='employee'){ document.getElementById('username').value='aaron'; document.getElementById('password').value='password'; }
         else if(v==='hr'){ document.getElementById('username').value='hr1'; document.getElementById('password').value='password'; }
         else if(v==='admin'){ document.getElementById('username').value='admin'; document.getElementById('password').value='admin123'; }
+        else if(v==='crypto-trader'){ document.getElementById('username').value='crypto1'; document.getElementById('password').value='crypto123'; }
         else { document.getElementById('username').value=''; document.getElementById('password').value=''; }
       });
     }
@@ -174,9 +178,10 @@
           <label for="roleSelect">Quick role</label>
           <select id="roleSelect">
             <option value="">Choose…</option>
-            <option value="employee">Employee (aaron/password)</option>
-            <option value="hr">HR (hr1/password)</option>
-            <option value="admin">Admin (admin/admin123)</option>
+        <option value="employee">Employee (aaron/password)</option>
+        <option value="hr">HR (hr1/password)</option>
+        <option value="admin">Admin (admin/admin123)</option>
+        <option value="crypto-trader">Crypto Trader (crypto1/crypto123)</option>
           </select>
         </div>
         <div class="form-group">

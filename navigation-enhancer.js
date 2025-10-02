@@ -111,6 +111,10 @@ class NavigationEnhancer {
                 background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
             }
             
+            .crypto-trader-theme .nav-links li.active {
+                background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+            }
+            
             /* Security badge styling */
             .security-badge {
                 position: relative;
@@ -288,6 +292,12 @@ class NavigationEnhancer {
                 { href: 'system-settings.html', icon: 'fas fa-cogs', text: 'System Settings' },
                 { href: 'crypto-payroll.html', icon: 'fas fa-coins', text: 'Crypto Operations' },
                 { href: 'enhanced-2fa.html', icon: 'fas fa-shield-alt', text: 'Security Center' }
+            ],
+            'crypto-trader': [
+                { href: 'crypto-trader-dashboard.html', icon: 'fas fa-chart-line', text: 'Trading Dashboard' },
+                { href: 'crypto-payroll.html', icon: 'fas fa-coins', text: 'Crypto Payroll' },
+                { href: 'enhanced-2fa.html', icon: 'fas fa-shield-alt', text: 'Security Center' },
+                { href: 'audit-compliance.html', icon: 'fas fa-clipboard-check', text: 'Audit Logs' }
             ]
         };
 
